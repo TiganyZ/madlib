@@ -1,0 +1,12 @@
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.1
+fix     mad all mad/xrd c_gr target data/xrd_glassy_carbon_zeng_2017.fq &
+        q 1.04525 9.97006 201 output qFq species C O weighting xray gamma 0.0 file xrd_pred.dat
+run 0

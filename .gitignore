@@ -1,0 +1,6 @@
+tests/_fd.data
+tests/*.dat
+tests/*.dump
+tests/__pycache__/
+tests/in.kde0
+tests/in.range

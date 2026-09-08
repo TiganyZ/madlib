@@ -1,0 +1,19 @@
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.1
+fix     mad all mad/pdf c_gr target data/pdf_target.dat gamma 100.0 output pdf
+
+compute fsx all reduce sum fx
+compute fsy all reduce sum fy
+compute fsz all reduce sum fz
+compute vir all pressure NULL virial
+thermo_style custom step f_mad f_mad[2] f_mad[3] c_fsx c_fsy c_fsz c_vir[1] c_vir[4]
+thermo_modify format float %.17g
+run 0

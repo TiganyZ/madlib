@@ -1,0 +1,14 @@
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 6.5
+pair_coeff      * *
+comm_modify     cutoff 14.0
+neighbor        0.5 bin
+
+compute gr all mad/pdf r 0.1 6.0 201 rcut 6.0 kde 0.1
+fix     out all ave/time 1 1 1 c_gr[*] mode vector file gr_lammps.dat format " %.17g"
+
+run 0

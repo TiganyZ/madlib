@@ -1,0 +1,23 @@
+variable        bias index yes
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.15
+fix     mad all mad/xrd c_gr target data/xrd_target.dat q 1.04525 9.97006 201 &
+        output qFq species C O weighting xray gamma 5.0
+fix_modify mad energy ${bias}
+
+velocity all create 300.0 12345 mom yes
+fix     nve all nve
+fix     swap all atom/swap 5 20 29494 300.0 ke no types 1 2
+
+thermo 100
+thermo_style custom step f_mad f_mad[2] f_swap[1] f_swap[2]
+thermo_modify format float %.8g
+run 300

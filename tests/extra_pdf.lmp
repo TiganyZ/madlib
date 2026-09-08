@@ -1,0 +1,2 @@
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.1
+fix     mad all mad/pdf c_gr target data/pdf_target.dat gamma 100.0 output pdf
