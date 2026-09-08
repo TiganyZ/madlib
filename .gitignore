@@ -4,3 +4,4 @@ tests/*.dump
 tests/__pycache__/
 tests/in.kde0
 tests/in.range
+tests/data/_fd.data
