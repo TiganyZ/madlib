@@ -200,6 +200,8 @@ void FixMAD::write_spectrum()
           target->offset());
   const double s = target->scale(), b = target->offset();
   for (int k = 0; k < nk; k++)
-    fprintf(fp, "%20.10f %20.10f %20.10f\n", xgrid[k], s * y_pred[k] + b, target->y_exp()[k]);
+    // Enough digits that a reference check is limited by the calculation and
+    // not by the file. TurboGAP's F20.8 puts a 5e-9 floor under its own tests.
+    fprintf(fp, "%24.16e %24.16e %24.16e\n", xgrid[k], s * y_pred[k] + b, target->y_exp()[k]);
   fclose(fp);
 }

@@ -22,8 +22,10 @@ SOAP/GAP potential.
 |---|---|
 | PDF `g(r)` / `D(r)` | working, validated |
 | `S(q)`, XRD, ND | working, validated |
+| **XPS**, and any spectrum from a broadened per-atom scalar | working, validated |
+| **The per-atom property layer** | working — `coord` and `table` backends |
 | Experimentally biased MC | working — via LAMMPS's own MC fixes, no new MC code |
-| XPS | designed, not yet built (needs the per-atom property layer) |
+| GAP / ACE / MACE / GRACE / MLIAP property backends | next; the interface they plug into is done |
 | IR | prediction only, planned |
 
 Built against LAMMPS `stable_22Jul2025_update6`.
@@ -106,6 +108,51 @@ picks the default weighting.
 | `window_cut` | `rmax` | its cutoff — the **transform range**, not the neighbour cutoff |
 | `lp`, `polarization` | `no`, `1.0` | powder Lorentz-polarization factor |
 
+### `compute ID group mad/property/*`
+
+A per-atom quantity and its adjoint. XPS needs core-electron binding energies;
+IR will need local dipoles. Two backends so far:
+
+```lammps
+compute cn all mad/property/coord cutoff 1.7 2.1   # smooth coordination number
+compute q  all mad/property/table values 290.0 536.0
+compute q  all mad/property/table file cebe.dat    # "atom-id value" per line
+```
+
+`coord` has an analytic gradient and no data files, which is what lets the whole
+XPS chain be finite-differenced before any ML model is involved. `table` has no
+gradient by construction and says so rather than silently exerting no force, so
+it is for prediction (`gamma 0.0`) from values computed elsewhere.
+
+**Adding a model is one method.** What the bias needs is never the full Jacobian
+`dq_i/dr_j`, only its contraction with a per-atom weight:
+
+```cpp
+virtual void adjoint(double **lambda, double *virial);   // f_j -= sum_i lambda_i dq_i/dr_j
+```
+
+and that is the force a model already computes from a weighted per-atom energy
+`sum_i lambda_i q_i`. A GAP scales its kernel derivative row, MLIAP scales
+`betas`, a torch model takes one backward pass. This is the whole of what makes
+MADLIB model-agnostic.
+
+### `fix ID group mad/xps <compute> [keyword value ...]`
+
+```
+u_l = sum_i exp( -(x_l - q_i)^2 / 2 sigma^2 ),   y = u / ||u||
+```
+
+| keyword | default | meaning |
+|---|---|---|
+| `energy` | **required** | `<emin> <emax> <nsamples>`, in eV for XPS |
+| `sigma` | `0.4` | broadening width, same units as the property |
+| `norm` | `l2` | `l2` (TurboGAP's), `area`, or `none` |
+| `trunc` | `8.0` | Gaussian tails past this many sigma are dropped |
+
+Also registered as `fix mad/spectrum`, since nothing in it is specific to
+photoemission — any observable that is a broadened sum over a per-atom scalar
+fits.
+
 ### Shared by every `fix mad/*`
 
 `target <file>` (two columns, no header), `gamma <g>` or `gamma <beg> <end>`,
@@ -142,6 +189,11 @@ plausible-looking answer:
   configurations, so a cached spectrum would price every trial move against the
   first one — and the bias would simply never reach the Metropolis test, with
   no error anywhere. The pair pass is repeated instead.
+- **A serial run still has ghosts.** The property adjoint reaches neighbours of
+  `i`, so it accumulates into a buffer over `nlocal+nghost` and reverse-
+  communicates. Guarding that on `nprocs > 1` leaves the *serial* force wrong by
+  a constant, because periodic images are ghosts too. The h-scan showed it as a
+  flat curve; no single tolerance would have.
 
 ## Tests
 
@@ -159,9 +211,12 @@ tests/run.sh gradients mpi   # a subset
 | `guards` | the three refusals above actually fire |
 | `md` | a biased run closes the gap — `rel_error` 0.99 to 0.04 |
 | `mc` | the bias reaches an unmodified LAMMPS MC fix's acceptance |
+| `xps` | the property layer end to end: invariants, the adjoint's reverse communication across ranks, and reverse Monte Carlo |
 
-Measured: forward `g(r)` to `5e-15`; force h-scan ratio `9.01` for a 3x step;
-all four virial components to `1e-9`–`5e-7`; 1-vs-4-rank energy to `1e-16`.
+Measured: forward `g(r)` to `5e-15` and the XPS spectrum to `3e-16`; force
+h-scan ratios `9.0`–`11.3` for a 3x step on all three observables; all four
+virial components to `1e-9`–`5e-7`; 1-vs-4-rank energy to `1e-16`; XPS reverse
+MC `rel_error` 0.385 unbiased against 0.045 biased.
 
 ## Building
 

@@ -141,3 +141,55 @@ which is
 Getting this wrong left all three diagonals off by the same constant while the
 shear was exact — the signature of a pure volume term, and worth remembering as
 a diagnostic.
+
+---
+
+# M2 — the property layer and XPS
+
+## 9. A serial run still has ghosts, and guarding the reverse comm on `nprocs` is wrong
+
+`ComputeMADProperty::scatter_adjoint()` accumulates `dq_i/dr_j` into a buffer
+covering `nlocal+nghost` and reverse-communicates it, because Verlet
+reverse-communicates before `post_force()` and a force written to a ghost there
+is lost. The obvious optimisation
+
+```cpp
+if (comm->nprocs > 1) comm->reverse_comm(this);   // WRONG
+```
+
+is wrong: **a single rank with periodic boundaries still has ghost atoms**, and
+their share of the adjoint has to be folded back onto the atoms that own them.
+`comm->reverse_comm()` does that on one rank too.
+
+The signature was distinctive and worth remembering: the **virial was exactly
+right in all four components** while the **forces were wrong by a constant**,
+giving a finite-difference h-scan that was flat at ratio 1.00 instead of falling
+as h^2. The virial is formed inside the pair loop from `fpair` and the
+separation, so it never touches the scatter; only the forces do. Virial correct
+plus forces wrong by a constant therefore points at the scatter and nothing
+else.
+
+This is exactly the failure the h-scan exists to catch, and precisely what a
+single tolerance would have passed: the error was 0.348 at both step sizes.
+
+## 10. Output precision has to be better than the thing being checked
+
+`fix mad/*`'s spectrum file was written `%20.10f`, which put a 5e-11 floor under
+the reference comparison and made a machine-precision agreement look like a
+5e-11 disagreement. TurboGAP has the same problem, and its own test notes it:
+`xrd_prediction.dat` is `F20.8`, "so 5e-9 per sample is the floor and nothing
+here can be checked tighter than that". Written `%24.16e`, the XPS spectrum
+agrees with an independent reference to **3e-16**.
+
+## 11. `fix tfmc` cannot test the energy path
+
+It is a force-bias method: it moves atoms from forces and never forms a
+Metropolis ratio on the energy, so `fix_modify energy no` changes nothing about
+it. `fix gcmc` with `nexchanges = 0` and translation moves is the right stock
+fix for a reverse-Monte-Carlo demonstration, and `fix atom/swap` for a
+composition one -- but only if the property actually depends on the types being
+swapped, which a plain coordination number does not.
+
+The precise test of the mechanism is simpler than either: `compute pe` reads
+1.707 with `fix_modify mad energy yes` and 0 with `no`. Every MC fix prices a
+trial move with `compute pe`, so that single comparison is the claim.
