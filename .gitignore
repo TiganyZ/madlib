@@ -5,3 +5,7 @@ tests/__pycache__/
 tests/in.kde0
 tests/in.range
 tests/data/_fd.data
+lib/madlib/*.o
+lib/madlib/turbogap/*.o
+lib/madlib/*.mod
+lib/madlib/libmadlib.a

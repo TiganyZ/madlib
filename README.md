@@ -23,9 +23,10 @@ SOAP/GAP potential.
 | PDF `g(r)` / `D(r)` | working, validated |
 | `S(q)`, XRD, ND | working, validated |
 | **XPS**, and any spectrum from a broadened per-atom scalar | working, validated |
-| **The per-atom property layer** | working — `coord` and `table` backends |
+| **The per-atom property layer** | working — `turbogap`, `coord` and `table` backends |
+| **TurboGAP `.gap` models, unchanged** | working — reproduces TurboGAP's own binding energies to 1.2e-9 relative |
 | Experimentally biased MC | working — via LAMMPS's own MC fixes, no new MC code |
-| GAP / ACE / MACE / GRACE / MLIAP property backends | next; the interface they plug into is done |
+| ACE / MACE / GRACE / MLIAP property backends | next; the interface they plug into is done |
 | IR | prediction only, planned |
 
 Built against LAMMPS `stable_22Jul2025_update6`.
@@ -114,10 +115,21 @@ A per-atom quantity and its adjoint. XPS needs core-electron binding energies;
 IR will need local dipoles. Two backends so far:
 
 ```lammps
+# a fitted TurboGAP GPR -- an existing .gap file, used as it stands
+compute q  all mad/property/turbogap gap_files/CO.gap core_electron_be species C O
+
 compute cn all mad/property/coord cutoff 1.7 2.1   # smooth coordination number
 compute q  all mad/property/table values 290.0 536.0
 compute q  all mad/property/table file cebe.dat    # "atom-id value" per line
 ```
+
+`turbogap` evaluates `q_i = V0 + delta^2 sum_s alpha_s (soap_i . Q_s)^zeta` through
+soap_turbo, one block per central species. Fitting a core-electron-binding-energy
+model is months of work and there is no reason to refit one to move it, so the
+potential file is read as it stands — including the fact that its sparse-set
+paths are written relative to the directory TurboGAP was *run* from rather than
+to the file. Needs the Fortran backend; without it the style still exists and
+says what to build.
 
 `coord` has an analytic gradient and no data files, which is what lets the whole
 XPS chain be finite-differenced before any ML model is involved. `table` has no
@@ -212,24 +224,44 @@ tests/run.sh gradients mpi   # a subset
 | `md` | a biased run closes the gap — `rel_error` 0.99 to 0.04 |
 | `mc` | the bias reaches an unmodified LAMMPS MC fix's acceptance |
 | `xps` | the property layer end to end: invariants, the adjoint's reverse communication across ranks, and reverse Monte Carlo |
+| `gap` | the soap_turbo backend against TurboGAP's own numbers, its derivatives by finite differences, and rank-invariance. Skips cleanly when built without the backend. |
 
-Measured: forward `g(r)` to `5e-15` and the XPS spectrum to `3e-16`; force
-h-scan ratios `9.0`–`11.3` for a 3x step on all three observables; all four
-virial components to `1e-9`–`5e-7`; 1-vs-4-rank energy to `1e-16`; XPS reverse
-MC `rel_error` 0.385 unbiased against 0.045 biased.
+The gradient legs report an **observed convergence order**, not a tolerance at
+each step. A large `h` legitimately has a large truncation error, and demanding
+that it be small would reward a gradient that is wrong in a way that happens to
+cancel; what a correct gradient must do is converge at order ~2, or already sit
+at the round-off floor.
+
+Measured: forward `g(r)` to `5e-15` and the XPS spectrum to `3e-16`; observed
+gradient order `2.02` on the soap_turbo chain; all four virial components to
+`1e-9`–`7e-6`; 1-vs-4-rank energy to `1e-16` (`1e-14` through the descriptor);
+91 binding energies against TurboGAP to `1.2e-9` relative; XPS reverse MC
+`rel_error` 0.385 unbiased against 0.045 biased.
 
 ## Building
 
 ```sh
 ln -s /path/to/madlib/src/MADLIB   /path/to/lammps/src/MADLIB
+ln -s /path/to/madlib/lib/madlib   /path/to/lammps/lib/madlib
 cp    /path/to/madlib/cmake-MADLIB.cmake \
       /path/to/lammps/cmake/Modules/Packages/MADLIB.cmake
-# add MADLIB to STANDARD_PACKAGES in lammps/cmake/CMakeLists.txt
-cmake ../cmake -D PKG_MADLIB=on -D PKG_MC=on -D BUILD_MPI=on
 ```
 
-The optional Fortran backend (`MADLIB_ENABLE_TURBOGAP`) is not built by default
-and nothing in the package needs it yet.
+Then two edits to `lammps/cmake/CMakeLists.txt`: add `MADLIB` to
+`STANDARD_PACKAGES`, which compiles the sources, **and** to the first
+`foreach(PKG_WITH_INCL ...)` list, without which `Packages/MADLIB.cmake` is
+never read and the backend option is silently ignored.
+
+```sh
+cmake ../cmake -D PKG_MADLIB=on -D PKG_MC=on -D BUILD_MPI=on \
+               -D MADLIB_ENABLE_TURBOGAP=on
+```
+
+The Fortran backend is off by default. It vendors seven files from TurboGAP —
+`kinds`, the five `soap_turbo_*`, and `local_properties`, about 6k lines — and
+needs LAPACK as well as BLAS, because soap_turbo's radial basis orthonormalises
+through `dgesvd` and `dpotrf`. `lib/madlib/Makefile` builds it standalone for a
+conventional-make LAMMPS or for testing.
 
 ## Provenance
 

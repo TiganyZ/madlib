@@ -7,6 +7,7 @@ h-scan: a correct analytic gradient converges as h^2 until round-off, whereas a
 wrong constant factor gives a flat curve that a single tolerance would pass.
 """
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -118,7 +119,7 @@ def main():
     hs = [float(v) for v in a.hs.split(',')]
 
     print("\n  forces:  max|analytic - FD| over %d atoms" % len(sel))
-    prev, ok = None, True
+    prev, ok, scan = None, True, []
     for h in hs:
         worst = 0.0
         for idx in sel:
@@ -134,9 +135,23 @@ def main():
         rate = "" if prev is None else "  ratio %.2f" % (prev / worst if worst else float('inf'))
         print(f"    h = {h:8.1e}   max|df| = {worst:.3e}{rate}")
         prev = worst
-        ok = ok and worst < a.tol
+        scan.append((h, worst))
 
-    print("\n  (a correct gradient gives ratio ~ 9 per 3x step until round-off)")
+    # The criterion is the shape of the scan, not a tolerance at every step: a
+    # large h legitimately has a large truncation error, and demanding it be
+    # small would only reward a gradient that is wrong in a way that happens to
+    # cancel. What a correct gradient must do is converge -- order ~2 -- or
+    # already sit at the round-off floor.
+    h0, e0 = scan[0]
+    h1, e1 = scan[-1]
+    order = (math.log(e0 / e1) / math.log(h0 / h1)) if (e1 > 0 and e0 > 0 and h0 != h1) else 0.0
+    at_floor = e1 < 1e-9
+    good = e1 < a.tol and (order > 1.5 or at_floor)
+    print(f"\n  observed order {order:.2f} over h {h0:.1e} -> {h1:.1e}"
+          f"{'  (at the round-off floor)' if at_floor else ''}")
+    print("  (h^2 is order 2; a wrong constant factor gives order 0 and any single"
+          " tolerance passes it)")
+    ok = ok and good
 
     # virial, by straining the cell and every position affinely.
     # F = I + e S, so dE/de = -sum_ab W_ab S_ab. Only strains that keep the

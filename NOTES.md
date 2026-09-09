@@ -193,3 +193,68 @@ swapped, which a plain coordination number does not.
 The precise test of the mechanism is simpler than either: `compute pe` reads
 1.707 with `fix_modify mad energy yes` and 0 with `no`. Every MC fix prices a
 trial move with `compute pe`, so that single comparison is the claim.
+
+---
+
+# M3 — the soap_turbo backend
+
+The plan's estimate held up: the vendored set is exactly the seven files its
+dependency closure predicted (`kinds`, five `soap_turbo_*`, `local_properties`,
+5986 lines), `read_files.f90` was correctly left out in favour of a 250-line C++
+parser, and the two Fortran entry points needed nothing wrapped around them.
+Four things it got wrong or did not know.
+
+## 12. LAPACK, not just BLAS
+
+soap_turbo's radial basis orthonormalises through `dgesvd`, `dpotrf` and
+`dpotri`, so the backend needs LAPACK. The plan said "needing only BLAS".
+
+## 13. Being in `STANDARD_PACKAGES` does not get `Packages/<PKG>.cmake` read
+
+LAMMPS compiles a package's sources from a glob driven by `STANDARD_PACKAGES`,
+but only *includes* `cmake/Modules/Packages/<PKG>.cmake` for packages named in
+one of two explicit `foreach(PKG_WITH_INCL ...)` lists
+(`cmake/CMakeLists.txt:628`, `:765`). A package with an optional external
+library has to be in both lists, and the failure mode is quiet: the option is
+accepted, cached, and ignored, and the link fails with undefined references to
+the library that was never built.
+
+Consequence for the file itself: since the glob already adds the sources,
+`MADLIB.cmake` must **not** add them again.
+
+## 14. `.gap` paths are relative to where TurboGAP was run
+
+`gap_files/CO.gap` contains `local_property_qs = 'gap_files/core_electron_be...'`
+-- relative to the directory TurboGAP is launched from, not to the potential
+file. A LAMMPS run has no reason to share that directory, so the parser tries
+the path as given, then beside the `.gap` file, then flattened beside it.
+
+## 15. `make` predefines `FC`
+
+`FC ?= gfortran` in a Makefile does nothing, because `make` has already set
+`FC = f77`. Plain `FC = gfortran` still lets a command-line `make FC=ifx` win.
+
+## The agreement, and what limits it
+
+91 core-electron binding energies against TurboGAP's own values for the same
+frame: **max 3.4e-7 eV, 1.2e-9 relative**, median 8.9e-8 eV. Not bit-identical,
+and the residual is not the sparse-set files or the hyperparameters -- a
+standalone driver with a brute-force image loop gets 4.4e-8 against the same
+reference. What is left is summation order: LAMMPS's neighbour list presents a
+different pair ordering, and that propagates through an SVD-orthonormalised
+radial basis. It is eight orders below the accuracy of any CEBE model, but it
+is worth stating as "agrees to 1e-9 relative" rather than "reproduces".
+
+## The finite-difference criterion had to change
+
+The soap_turbo chain reaches its round-off floor by `h = 1e-4`, where the error
+*grows* as `h` shrinks. Scanning down from `3e-3` shows the h^2 regime cleanly
+(ratios 9.04 and 11.51, **observed order 2.02**), but the old pass criterion --
+every step below one tolerance -- failed on the largest `h`, whose truncation
+error is legitimately large.
+
+The criterion is now the shape of the scan: the smallest `h` must be below
+tolerance, and the observed order must exceed 1.5 or the error must already be
+at the floor. Demanding a small error at large `h` would reward a gradient that
+is wrong in a way that happens to cancel, which is the opposite of what the scan
+is for.

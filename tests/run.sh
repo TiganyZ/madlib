@@ -22,7 +22,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps}
+want=${*:-forward gradients invariants mpi guards md mc xps gap}
 
 for w in $want; do
 case $w in
@@ -137,6 +137,59 @@ print(f"    rel_error {rel[0]:.4f} -> {rel[-1]:.4f} over {len(rel)} samples")
 sys.exit(0 if rel[-1] < 0.25 * rel[0] else 1)
 PY
   if [ $? -eq 0 ]; then ok "the bias closes the gap"; else bad "rel_error did not fall"; fi
+  ;;
+
+gap)
+  leg "the soap_turbo backend against TurboGAP itself"
+  if ! $LMP -in in.cebe -log none 2>&1 | grep -q "soap_turbo block"; then
+    echo "    SKIP: built without the Fortran backend (-D MADLIB_ENABLE_TURBOGAP=on)"
+  else
+    $LMP -in in.cebe -log none >/dev/null 2>&1
+    $PYTHON - <<'PY'
+import sys
+ref = {int(l.split()[0]): float(l.split()[1]) for l in open('data/cebe_turbogap.dat')}
+body = open('cebe.dump').read().split('ITEM: ATOMS')[-1].split('\n')[1:]
+got = {int(l.split()[0]): float(l.split()[1]) for l in body if len(l.split()) == 2}
+d = [abs(got[i] - ref[i]) for i in ref]
+rel = max(x / abs(ref[i]) for x, i in zip(d, ref))
+print(f"    {len(ref)} core-electron binding energies, mean {sum(ref.values())/len(ref):.2f} eV")
+print(f"    max |LAMMPS - TurboGAP| = {max(d):.2e} eV   ({rel:.1e} relative)")
+sys.exit(0 if rel < 1e-7 else 1)
+PY
+    if [ $? -eq 0 ]; then ok "an existing .gap model reproduces TurboGAP"
+    else bad "the .gap model disagrees with TurboGAP"; fi
+
+    leg "soap_turbo derivatives, by finite differences"
+    if $PYTHON fd_gradient.py data/gc91.data extra_xps_gap.lmp --lmp "$LMP" \
+         --atoms 2 --hs 3e-3,1e-3,3e-4 --paircut 6.0 >/tmp/fd_gap.log 2>&1; then
+      grep -E "ratio|analytic W" /tmp/fd_gap.log | sed 's/^/     /'
+      ok "dq/dr through the descriptor"
+    else
+      sed 's/^/     /' /tmp/fd_gap.log | tail -18
+      bad "dq/dr through the descriptor"
+    fi
+
+    leg "the same, across ranks"
+    $LMP -in in.invariants_gap -log none 2>&1 | grep -A2 '^   Step' | sed -n 2p > /tmp/gap_1.txt
+    mpirun --oversubscribe -np "$RANKS" $LMP -in in.invariants_gap -log none 2>&1 \
+        | grep -A2 '^   Step' | sed -n 2p > /tmp/gap_n.txt
+    $PYTHON - <<'PY'
+import sys
+a, b = open('/tmp/gap_1.txt').read().split(), open('/tmp/gap_n.txt').read().split()
+names = ["step","E","rel_error","dissim","fx","fy","fz","virial_xx","virial_xy"]
+bad = 0
+for n, x, y in zip(names, a, b):
+    if n == "step": continue
+    x, y = float(x), float(y)
+    if n in ("fx","fy","fz"): d, tol, kind = max(abs(x), abs(y)), 1e-9, "abs"
+    else: d, tol, kind = abs(x-y)/max(abs(x),1e-12), 1e-10, "rel"
+    if d >= tol: bad = 1
+    print(f"    {'PASS' if d < tol else 'FAIL'}: {n:10s} {kind} {d:.2e}")
+sys.exit(bad)
+PY
+    if [ $? -eq 0 ]; then ok "the descriptor adjoint is rank-invariant"
+    else bad "the descriptor adjoint differs across ranks"; fi
+  fi
   ;;
 
 xps)
