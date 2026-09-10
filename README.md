@@ -26,8 +26,9 @@ SOAP/GAP potential.
 | **The per-atom property layer** | working — `turbogap`, `coord` and `table` backends |
 | **TurboGAP `.gap` models, unchanged** | working — reproduces TurboGAP's own binding energies to 1.2e-9 relative |
 | Experimentally biased MC | working — via LAMMPS's own MC fixes, no new MC code |
+| **IR prediction** | working — agrees with GPUMD's pipeline to 1.5e-13, via TurboGAP |
+| IR bias | not planned here; see the note under `fix mad/ir` |
 | ACE / MACE / GRACE / MLIAP property backends | next; the interface they plug into is done |
-| IR | prediction only, planned |
 
 Built against LAMMPS `stable_22Jul2025_update6`.
 
@@ -118,7 +119,8 @@ IR will need local dipoles. Two backends so far:
 # a fitted TurboGAP GPR -- an existing .gap file, used as it stands
 compute q  all mad/property/turbogap gap_files/CO.gap core_electron_be species C O
 
-compute cn all mad/property/coord cutoff 1.7 2.1   # smooth coordination number
+compute mu all mad/property/dipole charges 0.5 -0.5  # or 'charge' to use atom->q
+compute cn all mad/property/coord cutoff 1.7 2.1     # smooth coordination number
 compute q  all mad/property/table values 290.0 536.0
 compute q  all mad/property/table file cebe.dat    # "atom-id value" per line
 ```
@@ -130,6 +132,13 @@ potential file is read as it stands — including the fact that its sparse-set
 paths are written relative to the directory TurboGAP was *run* from rather than
 to the file. Needs the Fortran backend; without it the style still exists and
 says what to build.
+
+`dipole` gives `mu_i = q_i r_i` from per-type charges or from `atom->q`, so any
+model that writes charges is a dipole model here. **`sum q_i r_i` is not defined
+in a periodic box** — it depends on the origin and on which images the atoms
+happen to be wrapped into — so a periodic run needs molecule IDs, and gets the
+sum of molecular dipoles built from intramolecular vectors; a periodic box
+without them is refused rather than given a plausible number.
 
 `coord` has an analytic gradient and no data files, which is what lets the whole
 XPS chain be finite-differenced before any ML model is involved. `table` has no
@@ -164,6 +173,47 @@ u_l = sum_i exp( -(x_l - q_i)^2 / 2 sigma^2 ),   y = u / ||u||
 Also registered as `fix mad/spectrum`, since nothing in it is specific to
 photoemission — any observable that is a broadened sum over a per-atom scalar
 fits.
+
+### `fix ID group mad/ir <stride> <compute> [keyword value ...]`
+
+An infrared spectrum from the total dipole of a running trajectory, by
+Wiener–Khinchin.
+
+```lammps
+compute mu all mad/property/dipole charges 0.5 -0.5
+fix     ir all mad/ir 2 c_mu nu_max 4000 acf_ratio 0.25 qc classical &
+           smooth 5 gaussian file ir_spectrum.dat
+```
+
+| keyword | default | meaning |
+|---|---|---|
+| `nu_max` | `4000.0` | top of the returned range, cm⁻¹; refused above Nyquist |
+| `acf_ratio` | `0.1` | fraction of the buffer kept as lags. **This sets the resolution.** |
+| `window` | `hann` | lag window: `hann`, `bartlett`, `welch`, `lorch`, `blackman`, `none` |
+| `qc` | `harmonic` | `harmonic`, `classical` (alias `quadratic`), `linear`, `none` |
+| `temp` | `300.0` | K, for `harmonic` |
+| `smooth` | `10 gaussian` | width in **bins**, not cm⁻¹; `gaussian` or `box` |
+| `frame_dt` | | fs between frames, for a `rerun` where `update->dt` is not the interval |
+
+`compute_array` gives the spectrum as `(nu, intensity, power)`;
+`compute_vector` gives `{frames, lags, bin, Nyquist, peak}`.
+
+**Prediction only.** A bias is a much larger job — the spectrum is a functional
+of the whole trajectory while only the newest frame can still be moved, which
+is what forces TurboGAP's frozen-past adjoint and its three alternative
+estimators — and none of it is needed to report a spectrum.
+
+**The weighting is a physical choice, not a detail.** `harmonic` is
+`nu(1-exp(-hbar c nu/kT))`, `classical` is `nu^2`. They agree only for
+`hbar w << kT` — below about 208 cm⁻¹ at 300 K — and at 3400 cm⁻¹ the harmonic
+form is 16 times smaller relative to the librational region. That is a tilt
+across the range, so no overall scale absorbs it. Two spectra of one trajectory
+disagreeing about band heights is this before it is anything else.
+
+**Resolution is the longest lag, not the run length.** A long run at a small
+`acf_ratio` gives a coarse spectrum and no amount of extra sampling changes it.
+Both this and the frame interval are written into the output header, because
+neither is a property of the sample and both are easy to assume wrongly.
 
 ### Shared by every `fix mad/*`
 
@@ -225,6 +275,7 @@ tests/run.sh gradients mpi   # a subset
 | `mc` | the bias reaches an unmodified LAMMPS MC fix's acceptance |
 | `xps` | the property layer end to end: invariants, the adjoint's reverse communication across ranks, and reverse Monte Carlo |
 | `gap` | the soap_turbo backend against TurboGAP's own numbers, its derivatives by finite differences, and rank-invariance. Skips cleanly when built without the backend. |
+| `ir` | the spectrum pipeline against TurboGAP's `ir_fft` over 29 configurations, a vibrational band against the force constant that produced it, the molecular dipole across ranks, and the periodic refusal |
 
 The gradient legs report an **observed convergence order**, not a tolerance at
 each step. A large `h` legitimately has a large truncation error, and demanding
@@ -236,7 +287,8 @@ Measured: forward `g(r)` to `5e-15` and the XPS spectrum to `3e-16`; observed
 gradient order `2.02` on the soap_turbo chain; all four virial components to
 `1e-9`–`7e-6`; 1-vs-4-rank energy to `1e-16` (`1e-14` through the descriptor);
 91 binding energies against TurboGAP to `1.2e-9` relative; XPS reverse MC
-`rel_error` 0.385 unbiased against 0.045 biased.
+`rel_error` 0.385 unbiased against 0.045 biased; the IR pipeline to `1.5e-13`
+over 29 configurations, and an IR band at 1402 cm⁻¹ against an analytic 1407.8.
 
 ## Building
 

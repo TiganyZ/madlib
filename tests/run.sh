@@ -22,7 +22,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap ir}
 
 for w in $want; do
 case $w in
@@ -137,6 +137,83 @@ print(f"    rel_error {rel[0]:.4f} -> {rel[-1]:.4f} over {len(rel)} samples")
 sys.exit(0 if rel[-1] < 0.25 * rel[0] else 1)
 PY
   if [ $? -eq 0 ]; then ok "the bias closes the gap"; else bad "rel_error did not fall"; fi
+  ;;
+
+ir)
+  rm -f /tmp/mad_mu.txt
+  leg "the IR pipeline against TurboGAP's ir_fft, which is verified against GPUMD"
+  MADIR=/tmp/mad_ir_driver
+  g++ -O2 -std=c++17 -o $MADIR test_ir_spectrum.cpp ../src/MADLIB/mad_ir_spectrum.cpp -lm \
+      2>/tmp/mad_ir_build.log
+  if [ ! -x $MADIR ]; then
+    sed 's/^/     /' /tmp/mad_ir_build.log | head -10
+    bad "could not build the IR driver"
+  else
+    TGSRC=${TURBOGAP_SRC:-../../alt/src}
+    if [ -f "$TGSRC/ir_fft.f90" ] && command -v gfortran >/dev/null; then
+      gfortran -O2 -o /tmp/irfftverify "$TGSRC/kinds.f90" "$TGSRC/ir_fft.f90" \
+          ../../alt/tests/ir_fft/irfftverify.f90 2>/dev/null
+    fi
+    if [ -x /tmp/irfftverify ]; then
+      if $PYTHON ir_compare_turbogap.py $MADIR /tmp/irfftverify data/ir_dipoles.dat; then
+        ok "machine-precision agreement with the reference implementation"
+      else bad "the IR pipeline disagrees with TurboGAP"; fi
+    else
+      echo "    SKIP: no TurboGAP source to build the reference against"
+    fi
+
+    leg "a vibrational band lands where the force constant puts it"
+    $LMP -in in.ir -log none >/dev/null 2>&1
+    $PYTHON - <<'PY'
+import sys
+import numpy as np
+d = np.loadtxt('ir_spectrum.dat')
+nu, I = d[:, 0], d[:, 1]
+K, r0 = 25.0, 1.13                       # bond_coeff, metal units
+m = 12.011 * 15.999 / (12.011 + 15.999)  # reduced mass, amu
+w = np.sqrt(2 * K / (m * 1.0364e-4))     # 1/ps; harmonic bond gives 2K
+exact = w / (2 * np.pi * 0.0299792458)
+sel = nu > 300.0
+peak = nu[sel][np.argmax(I[sel])]
+binw = d[1, 0] - d[0, 0]
+print(f"    analytic {exact:.1f} cm^-1, observed {peak:.1f} cm^-1, bin {binw:.1f} cm^-1")
+sys.exit(0 if abs(peak - exact) < 2.0 * binw else 1)
+PY
+    if [ $? -eq 0 ]; then ok "the band is where it should be"
+    else bad "the band is in the wrong place"; fi
+
+    leg "a molecular dipole survives being split across ranks"
+    for np in 1 $RANKS; do
+      rm -f mu.dump
+      mpirun --oversubscribe -np $np $LMP -in in.ir_molecular -log none >/dev/null 2>&1
+      $PYTHON - $np >> /tmp/mad_mu.txt <<'PY'
+import collections, sys
+rows = [l.split() for l in open('mu.dump').read().split('ITEM: ATOMS')[-1].split('\n')[1:]
+        if len(l.split()) == 6]
+m = collections.defaultdict(set)
+for r in rows: m[r[1]].add(r[2])
+print("%s %.14f %d %d" % (sys.argv[1], sum(float(r[5]) for r in rows),
+                          sum(1 for v in m.values() if len(v) > 1), len(m)))
+PY
+    done
+    $PYTHON - <<'PY'
+import sys
+rows = [l.split() for l in open('/tmp/mad_mu.txt')][-2:]
+for r in rows:
+    print(f"    {r[0]:>2s} rank(s): total mu_z = {float(r[1]):.12f}"
+          f"   ({r[2]} of {r[3]} molecules straddle)")
+d = abs(float(rows[0][1]) - float(rows[1][1])) / max(abs(float(rows[0][1])), 1e-12)
+print(f"    relative difference {d:.2e}")
+sys.exit(0 if d < 1e-10 and int(rows[1][2]) > 0 else 1)
+PY
+    if [ $? -eq 0 ]; then ok "the anchor is the same atom on every rank"
+    else bad "the molecular dipole depends on the rank count"; fi
+
+    leg "sum q_i r_i is refused where it has no meaning"
+    if $LMP -in in.ir_guard -log none 2>&1 | grep -q "not defined in a periodic box"; then
+      ok "a periodic box without molecules is an error, not a plausible spectrum"
+    else bad "a periodic sum q_i r_i was accepted"; fi
+  fi
   ;;
 
 gap)

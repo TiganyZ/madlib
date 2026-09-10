@@ -9,3 +9,5 @@ lib/madlib/*.o
 lib/madlib/turbogap/*.o
 lib/madlib/*.mod
 lib/madlib/libmadlib.a
+tests/*.dump
+tests/in.ir_guard.log

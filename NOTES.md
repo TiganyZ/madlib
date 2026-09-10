@@ -258,3 +258,44 @@ tolerance, and the observed order must exceed 1.5 or the error must already be
 at the floor. Demanding a small error at large `h` would reward a gradient that
 is wrong in a way that happens to cancel, which is the opposite of what the scan
 is for.
+
+---
+
+# M5 — IR prediction
+
+The pipeline port went as planned and inherits an external reference: MADLIB
+agrees with TurboGAP's `ir_fft.f90` to **1.5e-13 over 29 configurations**, and
+that file agrees with GPUMD's `TNEP/spectroscopy.py` to 3.5e-14 over eleven. An
+estimator written from the definition alone would have had neither. Two things
+the plan did not anticipate.
+
+## 16. Accumulating a trajectory is a fix's job, not a compute's
+
+The plan said `compute mad/ir`. A compute is only evaluated when something asks
+for it, and this has to see every stride-th step whether anything asks or not.
+`fix ave/correlate` is a fix for the same reason. It is `fix mad/ir`.
+
+## 17. The molecular dipole was silently wrong under MPI
+
+`mu_i = q_i r_i` is not defined in a periodic box, so the periodic path builds
+molecular dipoles from intramolecular vectors, measured from the lowest-tagged
+atom of each molecule. Choosing that anchor among the rank's **local** atoms
+makes it whichever fragment of the molecule the rank happens to hold, so a
+molecule split across two ranks is measured from two different origins and its
+dipole comes out as zero.
+
+Measured on 24 dimers in a periodic box, 8 of them straddling: **-13.56 on one
+rank, 0.00 on four.** No error, no warning.
+
+Choosing the anchor over local **and ghost** atoms fixes it, because a bonded
+molecule is always inside the communication cutoff, so every rank holding part
+of a molecule can see all of it and picks the same atom. Verified at 1, 2 and 4
+ranks with 8 molecules straddling: identical to the last digit.
+
+Two things about finding this are worth keeping. The first test looked like it
+passed: it used `boundary s s s`, which is not periodic, so it exercised the
+direct sum and never entered the molecular branch at all — a test can straddle
+molecules across ranks and still tell you nothing about the code you meant to
+test. The second is that the per-atom dump is what settled it: the values were
+exactly `q_i z_i`, which identified the branch immediately, where the totals
+alone had been agreeing for the wrong reason.
