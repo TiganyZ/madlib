@@ -10,6 +10,15 @@
 
 set -u
 cd "$(dirname "$0")"
+# One run at a time. The legs share scratch files in this directory, and two
+# suites interleaving produce wrong numbers rather than an obvious clash.
+LOCK=.run.lock
+if ! mkdir "$LOCK" 2>/dev/null; then
+  echo "ERROR: another tests/run.sh is running (remove $LOCK if that is stale)" >&2
+  exit 2
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
 LMP=${LMP:-../../lammps/build/lmp}
 PYTHON=${PYTHON:-python3}
 RANKS=${RANKS:-4}

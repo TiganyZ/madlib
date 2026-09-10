@@ -106,8 +106,13 @@ def main():
     extra = open(a.extra).read()
     box, tilt, atoms = read_data(a.data)
     ntypes = max(x[1] for x in atoms)
-    tmp = tempfile.mkdtemp()
-    base = os.path.join(os.path.dirname(os.path.abspath(a.data)) or ".", "_fd.data")
+    # The perturbed configuration goes in this run's own temporary directory,
+    # not beside the input. Two invocations sharing one scratch file overwrite
+    # each other's geometry between the write and the read, and what comes back
+    # is a finite difference of two different structures -- which reads as a
+    # broken gradient, with correct analytic values sitting next to it.
+    tmp = tempfile.mkdtemp(prefix="madlib-fd-")
+    base = os.path.join(tmp, "_fd.data")
 
     write_data(base, box, tilt, atoms, ntypes)
     e0, f0, v0 = run(a.lmp, base, extra, a.paircut, tmp)

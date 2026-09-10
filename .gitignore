@@ -11,3 +11,4 @@ lib/madlib/*.mod
 lib/madlib/libmadlib.a
 tests/*.dump
 tests/in.ir_guard.log
+tests/.run.lock/

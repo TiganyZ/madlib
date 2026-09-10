@@ -299,3 +299,24 @@ molecules across ranks and still tell you nothing about the code you meant to
 test. The second is that the per-atom dump is what settled it: the values were
 exactly `q_i z_i`, which identified the branch immediately, where the totals
 alone had been agreeing for the wrong reason.
+
+## 18. A shared scratch file made a correct gradient look broken
+
+`fd_gradient.py` wrote its perturbed configuration to `data/_fd.data`, beside
+the input. Running two suites at once — which is easy to do by accident with
+background jobs — means one overwrites the other's geometry between the write
+and the read, so the finite difference is taken between two *different*
+structures.
+
+What that looks like is the worst possible thing: the analytic forces and
+virial print their correct values, unchanged, next to finite differences that
+are nonsense and inconsistent between step sizes. It reads exactly like a
+gradient bug, and the h-scan — the very thing added to make gradient errors
+unambiguous — reports a negative convergence order, which is a real signature of
+a real problem.
+
+Two changes: the perturbed file now lives in the run's own `mkdtemp` directory,
+and `run.sh` takes a lock and refuses a second concurrent invocation with a
+message. The second matters more than the first. Other legs share scratch names
+too, and a suite that silently produces wrong numbers when run twice is worse
+than one that refuses.
