@@ -39,7 +39,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap ir quip torch}
+want=${*:-forward gradients invariants mpi guards md mc xps gap ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -154,6 +154,38 @@ print(f"    rel_error {rel[0]:.4f} -> {rel[-1]:.4f} over {len(rel)} samples")
 sys.exit(0 if rel[-1] < 0.25 * rel[0] else 1)
 PY
   if [ $? -eq 0 ]; then ok "the bias closes the gap"; else bad "rel_error did not fall"; fi
+  ;;
+
+mliap)
+  leg "an ML-IAP model as a per-atom property"
+  if ! $LMP -h 2>/dev/null | grep -q "mad/property/mliap"; then
+    echo "    SKIP: built without ML-IAP"
+  else
+    $LMP -in in.mliap -log none >/dev/null 2>&1
+    $PYTHON - <<'PY'
+import sys
+import numpy as np
+rows = sorted([l.split() for l in open("mliap_q.dump").read().split("ITEM: ATOMS")[-1].split("\n")[1:]
+               if len(l.split()) == 3], key=lambda r: int(r[0]))
+q = np.array([float(r[1]) for r in rows])
+pa = np.array([float(r[2]) for r in rows])
+d = np.abs(q - pa).max()
+print(f"    {len(q)} atoms: max |property - pair mliap per-atom energy| = {d:.2e}")
+sys.exit(0 if d < 1e-12 else 1)
+PY
+    if [ $? -eq 0 ]; then ok "the property is the model's own per-atom value"
+    else bad "the property disagrees with pair mliap"; fi
+
+    leg "its adjoint, by finite differences"
+    if $PYTHON fd_gradient.py data/ta54.data extra_xps_mliap.lmp --lmp "$LMP" \
+         --atoms 2 --hs 1e-3,3e-4,1e-4 --paircut 6.0 >/tmp/fd_mliap.log 2>&1; then
+      grep -E "ratio|observed order|analytic W" /tmp/fd_mliap.log | sed 's/^/     /'
+      ok "scaled betas give the right force"
+    else
+      sed 's/^/     /' /tmp/fd_mliap.log | tail -16
+      bad "the mliap adjoint is wrong"
+    fi
+  fi
   ;;
 
 torch)

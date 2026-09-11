@@ -356,3 +356,57 @@ The fitted potentials are 24 MB and were briefly committed. They belong to the
 `turbogap_tests` repository and change on a different cadence, so `run.sh` now
 looks for them under `$MADLIB_DATA_ROOT` and skips the legs that need them when
 they are absent -- the same arrangement TurboGAP's own suites use.
+
+---
+
+# M4 -- the MLIAP and Python backends
+
+Both confirm the design claim the property layer was built on: what a bias needs
+is never the full Jacobian, only its contraction with a per-atom weight, and
+that is the force a model already knows how to compute. Neither backend
+differentiates anything by hand.
+
+## 20. ML-IAP needs three init calls, and two of them look optional
+
+`ComputeMLIAP` calls `model->init()`, `descriptor->init()` and `data->init()`.
+Calling only the last -- which is the one with the object's name on it -- leaves
+the SNAP tables unbuilt, and every descriptor comes back zero.
+
+The symptom is worth remembering because it does not look like a missing call:
+the per-atom value came out as exactly the model's constant term for every atom.
+That reads as a model that simply does not vary with structure, which is a
+plausible thing for a badly fitted model to do.
+
+## 21. ML-IAP descriptors write to atom->f directly, not to data->f
+
+`MLIAPData` has an `f` member, and `generate_neighdata` sets it to `atom->f`, so
+redirecting it into a private buffer looks like the way to keep this
+contribution separable. It is not: `MLIAPDescriptorSNAP::compute_forces` opens
+with `double **f = atom->f;` and never consults `data->f` at all.
+
+Separability is not optional here -- the descriptor writes to ghosts, and Verlet
+reverse-communicates before `post_force()`, so those contributions would be lost.
+The fix is to point `atom->f` itself at the buffer for the duration of the call
+and restore it afterwards, which `MGPT/pair_mgpt.cpp:1749` already does.
+
+Without it the analytic virial came out as exactly zero next to a finite
+difference of 632, which at least fails loudly.
+
+## 22. The per-atom value is only written when asked for
+
+`MLIAPModelLinear::compute_gradients` fills `betas` unconditionally but guards
+`eatoms` with `if (data->eflag)`. A property backend wants the value as well as
+its derivative, so `generate_neighdata(list, 1, 0)`: eflag on, vflag off -- the
+latter because the virial would otherwise be tallied through a `PairMLIAP` that
+this compute deliberately does not have.
+
+## What the two backends are validated against
+
+The Python backend is checked against a torch reimplementation of the C++
+coordination number. That choice is the point: a model nobody can check
+independently would make the test a test of itself. Values agree to 1e-14 and
+the autograd adjoint finite-differences at order 2.00.
+
+The ML-IAP backend is checked against `pair_style mliap`'s own per-atom
+energies for the same model, which agree **exactly**, and its adjoint
+finite-differences at order 2.00 with all four virial components correct.

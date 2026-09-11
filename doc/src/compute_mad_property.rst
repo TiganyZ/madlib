@@ -1,6 +1,7 @@
 .. index:: compute mad/property/coord
 .. index:: compute mad/property/python
 .. index:: compute mad/property/dipole
+.. index:: compute mad/property/mliap
 .. index:: compute mad/property/table
 .. index:: compute mad/property/turbogap
 
@@ -9,6 +10,9 @@ compute mad/property/coord command
 
 compute mad/property/dipole command
 ===================================
+
+compute mad/property/mliap command
+==================================
 
 compute mad/property/python command
 ===================================
@@ -27,8 +31,8 @@ Syntax
    compute ID group-ID style keyword values ...
 
 * ID, group-ID are documented in :doc:`compute <compute>` command
-* style = *mad/property/coord* or *mad/property/dipole* or *mad/property/python*
-  or *mad/property/table* or *mad/property/turbogap*
+* style = *mad/property/coord* or *mad/property/dipole* or *mad/property/mliap*
+  or *mad/property/python* or *mad/property/table* or *mad/property/turbogap*
 
   .. parsed-literal::
 
@@ -39,6 +43,10 @@ Syntax
          *charges* values = one charge per atom type (charge units)
          *charge* = take the charges from the atom style instead
          *neutral_tol* value = largest net charge tolerated
+
+       *mad/property/mliap* keyword values
+         *model* values = style file = *linear* or *quadratic* or *nn*, and its parameters
+         *descriptor* values = style file = *sna* or *so3*, and its parameters
 
        *mad/property/python* args = module keyword values
          module = name of an importable Python module
@@ -64,6 +72,7 @@ Examples
    compute cn   all mad/property/coord cutoff 1.7 2.1
    compute q    all mad/property/table file cebe.dat
    compute qml  all mad/property/python my_mace_model ncomp 1 cutoff 5.0
+   compute qia  all mad/property/mliap model linear cebe.model descriptor sna cebe.descriptor
 
 Description
 """""""""""
@@ -111,6 +120,18 @@ therefore requires an atom style with molecule IDs, and the dipole is then the
 sum of molecular dipoles built from intramolecular vectors, which does not move
 with the origin.  A periodic box without molecule IDs is an error.
 
+*mad/property/mliap* evaluates an :doc:`ML-IAP <pair_mliap>` model.  Such a
+model maps descriptors to a per-atom scalar; that scalar is normally an energy,
+but nothing in the machinery requires it to be, and the same linear, quadratic
+or neural-network model fitted against core-electron binding energies is a
+binding-energy model.  Every descriptor ML-IAP supports comes with it.
+
+The adjoint costs no extra descriptor pass: ML-IAP already forms
+:math:`\beta_{ik} = \partial q_i/\partial B_{ik}` and contracts it against
+the descriptor derivatives to make forces, so scaling the betas by
+:math:`\lambda_i` beforehand turns that same contraction into what the bias
+needs.
+
 *mad/property/python* calls a model written in Python, so any framework
 reachable from there is a backend: MACE, GRACE, a torch module, a plain numpy
 expression.  The module must provide two functions,
@@ -155,7 +176,8 @@ page for more info.
 *mad/property/turbogap* additionally requires the optional Fortran backend in
 ``lib/madlib``, selected with ``-D MADLIB_ENABLE_TURBOGAP=on``, and
 *mad/property/python* the embedded interpreter, selected with
-``-D MADLIB_ENABLE_PYTHON=on``.  Without them the styles still exist and report
+``-D MADLIB_ENABLE_PYTHON=on``.  *mad/property/mliap* requires the ML-IAP
+package and the package supplying its descriptor.  Without them the styles still exist and report
 what to build.
 
 For *mad/property/coord*, *mad/property/python* and *mad/property/turbogap*,

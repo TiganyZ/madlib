@@ -13,6 +13,14 @@
 set(MADLIB_ENABLE_TURBOGAP OFF CACHE BOOL "Build the soap_turbo local-property backend")
 set(MADLIB_ENABLE_PYTHON OFF CACHE BOOL "Build the embedded-Python local-property backend")
 
+# The ML-IAP backend needs no option: it compiles when ML-IAP is enabled, since
+# that is the only thing it depends on.
+if(PKG_ML-IAP)
+  target_compile_definitions(lammps PRIVATE -DMADLIB_MLIAP)
+  target_include_directories(lammps PRIVATE ${LAMMPS_SOURCE_DIR}/ML-IAP)
+  message(STATUS "MADLIB: ML-IAP property backend enabled")
+endif()
+
 if(MADLIB_ENABLE_PYTHON)
   find_package(Python REQUIRED COMPONENTS Interpreter Development.Embed)
   target_link_libraries(lammps PRIVATE Python::Python)
