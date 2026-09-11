@@ -1,3 +1,4 @@
+// Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 #include "../src/MADLIB/mad_target.h"
 #include <cmath>
 #include <cstdio>

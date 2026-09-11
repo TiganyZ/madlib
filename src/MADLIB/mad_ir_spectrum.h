@@ -1,5 +1,18 @@
 /* -*- c++ -*- ----------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #ifndef LMP_MAD_IR_SPECTRUM_H
@@ -39,12 +52,12 @@ namespace LAMMPS_NS {
    about band heights is this before it is anything else. */
 
 struct MADIrConfig {
-  double dt_fs = 1.0;          // between STORED frames, in fs
+  double dt_fs = 1.0;    // between STORED frames, in fs
   double acf_ratio = 0.1;
   double max_freq_cm = 4000.0;
   double temperature = 300.0;
   double power_dc_cutoff_cm = 100.0;
-  int smooth_k = 10;           // in BINS, not cm^-1
+  int smooth_k = 10;    // in BINS, not cm^-1
   std::string smooth_kind = "gaussian";
   std::string window = "hann";
   std::string quantum_correction = "harmonic";

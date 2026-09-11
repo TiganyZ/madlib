@@ -1461,7 +1461,7 @@ module soap_turbo_radial
 !**************************************************************************
 !
 ! This subroutine returns the radial expansion coefficients using the
-! polynomial basis set and a polynomial piecewise representation for 
+! polynomial basis set and a polynomial piecewise representation for
 ! the atomic density
 !
   subroutine get_radial_expansion_coefficients_poly3operator(n_sites, n_neigh, rjs_in, alpha_max, &
@@ -1620,12 +1620,12 @@ module soap_turbo_radial
         if( scaling_mode == "polynomial" )then
 !         WARNING: the 1/atom_sigma_angular^2 term is missing from these amplitudes and needs to
 !                  be taken into account in the corresponding part of the code.
-!       
+!
 !         WARNING2: These expressions here already assume rcut_hard = 1., so this parameter is missing
 !                   from the expressions
           if( amplitude_scaling == 0.d0 )then
             amplitudes = 1.d0 / atom_sigma_scaleds
-            amplitudes_der = - atom_sigma_scaling / s2s 
+            amplitudes_der = - atom_sigma_scaling / s2s
 !            else if( 1.d0 + 2.d0*rjs**3 - 3.d0*rjs**2 <= 1.d-10 )then ! FIX THESE !!!!!!!!!!!!!!!!!!!!!!!!!!
 !              amplitudes = 0.d0
 !              amplitude_ders = 0.d0
@@ -1661,12 +1661,12 @@ module soap_turbo_radial
                            dsqrt(8.d0/pi)*atom_sigma_scaleds + dsqrt(8.d0/pi)*rjs*atom_sigma_scaling ) + &
                            amplitudes_der*( rjs**2 + s2s + dsqrt(8.d0/pi)*atom_sigma_scaleds*rjs )
           amplitudes = amplitudes * ( rjs**2 + s2s + dsqrt(8.d0/pi)*atom_sigma_scaleds*rjs )
-        end if     
+        end if
 !   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-!       NOTE: this below is design to be used with arrays that contain all the atoms. In some cases, the 
+!       NOTE: this below is design to be used with arrays that contain all the atoms. In some cases, the
 !       left_weights or right_weights might contain lots of zeros, in which case a speed up of close to x2
-!       could be achieved by not doing all atoms but only those for which the weights are 1. 
+!       could be achieved by not doing all atoms but only those for which the weights are 1.
 !       One could refactor this code with the nn construction to have, e.g., nn_soft and nn_buffer
 !       define arrays that give contribution of atoms within left and right of rcut_soft
 !       Note that these are integer arrays (0|1 = .false.|.true.)
@@ -1675,7 +1675,7 @@ module soap_turbo_radial
 !        buffer_weights = rcut_soft < rcut_hard .and. rjs + atom_widths > rcut_soft
 !        nn_buffer = count(buffer_weights)
 
-!       handle the central atom contribution; 
+!       handle the central atom contribution;
 !       NOTE: I'M NOT SURE ABOUT THE NEED FOR THIS DO_CENTRAL TAG HERE, IT SHOULD BE HANDLED VIA THE CENTRAL_WEIGHT
         if( .not. do_central )then
           if( size(amplitudes) > 0 )then
@@ -1759,7 +1759,7 @@ module soap_turbo_radial
                                              amplitudes_der(j) * exp_coeff_soft_array(j, 1:alpha_max)
           end do
 
-          deallocate( g_aux_left_der_array, g_aux_right_der_array, M_left_der_array, M_right_der_array, & 
+          deallocate( g_aux_left_der_array, g_aux_right_der_array, M_left_der_array, M_right_der_array, &
                       I_left_der_array, I_right_der_array, exp_coeff_soft_der_array )
 
         end if
@@ -1844,7 +1844,7 @@ module soap_turbo_radial
 !                   from the expressions
           if( amplitude_scaling == 0.d0 )then
             amplitudes = 1.d0 / atom_sigma_scaleds
-            amplitudes_der = - atom_sigma_scaling / s2s 
+            amplitudes_der = - atom_sigma_scaling / s2s
 !         else if( 1.d0 + 2.d0*rjs**3 - 3.d0*rjs**2 <= 1.d-10 )then ! FIX THESE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !           amplitudes = 0.d0
 !           amplitude_ders = 0.d0
@@ -1879,12 +1879,12 @@ module soap_turbo_radial
                               dsqrt(8.d0/pi)*atom_sigma_scaleds + dsqrt(8.d0/pi)*rjs*atom_sigma_scaling ) + &
                            amplitudes_der*( rjs**2 + s2s + dsqrt(8.d0/pi)*atom_sigma_scaleds*rjs )
           amplitudes = amplitudes * ( rjs**2 + s2s + dsqrt(8.d0/pi)*atom_sigma_scaleds*rjs )
-        end if     
+        end if
 !   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-!       NOTE: this below is design to be used with arrays that contain all the atoms. In some cases, the 
+!       NOTE: this below is design to be used with arrays that contain all the atoms. In some cases, the
 !       left_weights or right_weights might contain lots of zeros, in which case a speed up of close to x2
-!       could be achieved by not doing all atoms but only those for which the weights are 1. 
+!       could be achieved by not doing all atoms but only those for which the weights are 1.
 !       One could refactor this code with the nn construction to have, e.g., nn_soft and nn_buffer
 !       define arrays that give contribution of atoms within left and right of rcut_soft
 !       Note that these are integer arrays (0|1 = .false.|.true.)
@@ -1893,7 +1893,7 @@ module soap_turbo_radial
 !        buffer_weights = rcut_soft < rcut_hard .and. rjs + atom_widths > rcut_soft
 !        nn_buffer = count(buffer_weights)
 
-!       handle the central atom contribution; 
+!       handle the central atom contribution;
 !       NOTE: I'M NOT SURE ABOUT THE NEED FOR THIS DO_CENTRAL TAG HERE, IT SHOULD BE HANDLED VIA THE CENTRAL_WEIGHT
         if( .not. do_central )then
           if( size(amplitudes) > 0 )then
@@ -2071,7 +2071,7 @@ module soap_turbo_radial
 !
   function g_aux(r, r0, width, piece) result(poly)
     implicit none
- 
+
     real(dp), intent(in) :: r, r0, width
     character(*), intent(in) :: piece
     real(dp) :: x
@@ -2096,7 +2096,7 @@ module soap_turbo_radial
 !
   function g_aux_array(r, r0, width, piece) result(poly)
     implicit none
- 
+
     real(dp), intent(in) :: r(:,:), r0(:), width(:)
     character(*), intent(in) :: piece
     real(dp), dimension( 1:size(r,1), 1:size(r,2) ) :: x, x2, x3
@@ -2144,7 +2144,7 @@ module soap_turbo_radial
 !
   function g_aux_der_array(r, r0, width, width_scaling, piece) result(poly)
     implicit none
- 
+
     real(dp), intent(in) :: r(:,:), r0(:), width(:), width_scaling
     character(*), intent(in) :: piece
     real(dp), dimension( 1:size(r,1), 1:size(r,2) ) :: x, x2, x3
@@ -2201,7 +2201,7 @@ module soap_turbo_radial
     real(dp), intent(inout) :: A(:,:)
 
     allocate( factor(1:alpha_max) )
-    
+
     do i = 1, alpha_max
       A(i, 1) = rcut / N_a( rcut, i ) / dfloat(i + 3)
       factor(i) = (i + 3)
@@ -2209,7 +2209,7 @@ module soap_turbo_radial
 
     l = shape(A)
     do j = 2, l(2)
-        A(:, j) = A(:, j - 1) * rcut / dfloat(factor + j - 1) 
+        A(:, j) = A(:, j - 1) * rcut / dfloat(factor + j - 1)
     end do
 
   end subroutine
@@ -2217,7 +2217,7 @@ module soap_turbo_radial
 
 !**************************************************************************
 !
-! This subroutine returns the constant coefficients for the 
+! This subroutine returns the constant coefficients for the
 ! contribution from the buffer zone, coming from the dot products
 ! of poly. radial basis and smoothing function (filter)
 ! (in the notes: B_l, B_r)
@@ -2264,7 +2264,7 @@ module soap_turbo_radial
 
 !**************************************************************************
 !
-! This subroutine returns the constant coefficients for the 
+! This subroutine returns the constant coefficients for the
 ! contribution from the buffer zone for the derivatives, coming from
 ! the dot products of poly. radial basis and smoothing function (filter)
 ! (in the notes: partial_der(B_l), partial_der(B_r))
@@ -2311,7 +2311,7 @@ module soap_turbo_radial
 !**************************************************************************
 !
 ! This subroutine returns the radial terms coming from the
-! polynomial radial basis 
+! polynomial radial basis
 ! (in the notes: I0, R_hard)
 !
   function M_radial_poly_array(r, a_max, rcut) result(radial_terms)
@@ -2340,7 +2340,7 @@ module soap_turbo_radial
 !
 ! This function returns a vector of monomial terms (1, x, x**2, ...)
 ! for a given polynomial degree
-! (in the notes: R, R_ext) 
+! (in the notes: R, R_ext)
 !
   function radial_monomial(r, degree) result(radial_terms)
     implicit none
@@ -2348,11 +2348,11 @@ module soap_turbo_radial
     integer, intent(in) :: degree
     real(dp), intent(in) :: r
     integer :: p
-    real(dp), dimension(1:degree + 1) :: radial_terms 
+    real(dp), dimension(1:degree + 1) :: radial_terms
 
     radial_terms = 1.d0
     do p = 2, degree + 1
-      radial_terms(p) = r * radial_terms(p - 1) 
+      radial_terms(p) = r * radial_terms(p - 1)
     end do
 
   end function
@@ -2362,7 +2362,7 @@ module soap_turbo_radial
 !
 ! This function returns a vector of monomial terms (1, x, x**2, ...)
 ! for a given polynomial degree
-! (in the notes: R, R_ext) 
+! (in the notes: R, R_ext)
 !
   function radial_monomial_array(r, degree) result(radial_terms)
     implicit none
@@ -2370,11 +2370,11 @@ module soap_turbo_radial
     integer, intent(in) :: degree
     real(dp), intent(in) :: r(:)
     integer :: p
-    real(dp), dimension(1:size(r), 1:degree + 1) :: radial_terms 
+    real(dp), dimension(1:size(r), 1:degree + 1) :: radial_terms
 
     radial_terms = 1.d0
     do p = 2, degree + 1
-      radial_terms(:, p) = r(:) * radial_terms(:, p - 1) 
+      radial_terms(:, p) = r(:) * radial_terms(:, p - 1)
     end do
 
   end function
@@ -2390,7 +2390,7 @@ module soap_turbo_radial
 !        ( .       .                                 )
 !        ( .             .    degree!                )
 !
-! (in the notes: R*) 
+! (in the notes: R*)
 !
 ! Hardcoded for degree = 6
 ! Note that there is a size mismatch between radial_terms() and
@@ -2429,7 +2429,7 @@ module soap_turbo_radial
 !        ( .       .                                 )
 !        ( .             .    degree!                )
 !
-! (in the notes: R*) 
+! (in the notes: R*)
 !
 ! Hardcoded for degree = 6
 !

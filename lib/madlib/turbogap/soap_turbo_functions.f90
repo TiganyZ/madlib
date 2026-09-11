@@ -150,7 +150,7 @@ module soap_turbo_functions
     end do
 !   Prefactor
     pref = dsqrt( dfloat(2*l+1)/(4.d0*pi) * fact1 / fact2 )
-!   This is pl|m| 
+!   This is pl|m|
     plm = plm_double(l, abs(m), dcos(theta))
 !   Real part
     ylm_r = pref * plm * dcos( dfloat(abs(m))*phi )

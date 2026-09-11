@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "fix_mad_ir.h"
@@ -86,8 +99,10 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
   prop = dynamic_cast<ComputeMADProperty *>(cmp);
   if (!prop) error->all(FLERR, "fix mad/ir compute {} is not a mad/property style", propid);
   if (prop->n_components() != 3)
-    error->all(FLERR, "fix mad/ir needs a per-atom dipole, a property with three components, "
-                      "not {}", prop->n_components());
+    error->all(FLERR,
+               "fix mad/ir needs a per-atom dipole, a property with three components, "
+               "not {}",
+               prop->n_components());
 
   scalar_flag = 1;
   extscalar = 0;
@@ -224,11 +239,16 @@ double FixMADIr::compute_vector(int n)
 {
   if (!transform_now()) return 0.0;
   switch (n) {
-    case 0: return (double) res.n_frames;
-    case 1: return (double) res.n_lag;
-    case 2: return res.d_nu;
-    case 3: return res.nyquist;
-    case 4: return res.peak;
+    case 0:
+      return (double) res.n_frames;
+    case 1:
+      return (double) res.n_lag;
+    case 2:
+      return res.d_nu;
+    case 3:
+      return res.nyquist;
+    case 4:
+      return res.peak;
   }
   return 0.0;
 }
@@ -253,11 +273,12 @@ void FixMADIr::write()
   // Every limit of the calculation, in the file, because none of them is a
   // property of the sample and all of them are easy to assume wrongly.
   fprintf(fp, "# MADLIB IR spectrum, step " BIGINT_FORMAT "\n", update->ntimestep);
-  fprintf(fp, "# frames %d   stride %d   frame interval %.6g fs\n", res.n_frames, nevery, cfg.dt_fs);
+  fprintf(fp, "# frames %d   stride %d   frame interval %.6g fs\n", res.n_frames, nevery,
+          cfg.dt_fs);
   fprintf(fp, "# lags %d of %d (acf_ratio %.4g)   bin %.6g cm^-1   resolution %.6g cm^-1\n",
           res.n_lag, res.n_frames, cfg.acf_ratio, res.d_nu, res.resolution);
-  fprintf(fp, "# Nyquist %.6g cm^-1   window %s   weighting %s", res.nyquist,
-          cfg.window.c_str(), cfg.quantum_correction.c_str());
+  fprintf(fp, "# Nyquist %.6g cm^-1   window %s   weighting %s", res.nyquist, cfg.window.c_str(),
+          cfg.quantum_correction.c_str());
   if (cfg.quantum_correction == "harmonic") fprintf(fp, " at %.4g K", cfg.temperature);
   fprintf(fp, "\n");
   fprintf(fp, "# smoothing %d bins %s   mean dipole %.6g %.6g %.6g\n", cfg.smooth_k,

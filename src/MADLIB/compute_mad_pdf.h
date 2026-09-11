@@ -1,5 +1,18 @@
 /* -*- c++ -*- ----------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #ifdef COMPUTE_CLASS
@@ -63,14 +76,14 @@ class ComputeMADPdf : public Compute {
   bool compat;
   bigint invoked_types;
 
-  int *chan;         // (ntypes+1)^2 lookup, -1 for an unused type
-  int *count;        // atoms of each type
-  double *conc;      // count / natoms
-  double *rgrid;     // bin centres
-  double *shellinv;  // 1 / (sqrt(2pi) sigma 4 pi r_l^2)
-  double *cnorm;     // per-channel V/(N_a N_b f_ab)
-  double *gpart;     // (nbins x nchan) the reduced g_ab
-  double *glocal;    // this rank's partial accumulation
+  int *chan;           // (ntypes+1)^2 lookup, -1 for an unused type
+  int *count;          // atoms of each type
+  double *conc;        // count / natoms
+  double *rgrid;       // bin centres
+  double *shellinv;    // 1 / (sqrt(2pi) sigma 4 pi r_l^2)
+  double *cnorm;       // per-channel V/(N_a N_b f_ab)
+  double *gpart;       // (nbins x nchan) the reduced g_ab
+  double *glocal;      // this rank's partial accumulation
 
   class NeighList *list;
 

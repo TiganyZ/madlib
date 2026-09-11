@@ -1,4 +1,5 @@
 #!/bin/bash
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 # MADLIB acceptance tests.
 #
 #   ./run.sh            everything

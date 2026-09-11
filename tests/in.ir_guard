@@ -1,3 +1,4 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 # A periodic box with no molecule IDs: sum q_i r_i has no meaning here, and
 # the point of this deck is that MADLIB says so.
 units           metal

@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "compute_mad_property_coord.h"
@@ -31,7 +44,8 @@ ComputeMADPropertyCoord::ComputeMADPropertyCoord(LAMMPS *lmp, int narg, char **a
   int iarg = 3;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "cutoff") == 0) {
-      if (iarg + 2 >= narg) utils::missing_cmd_args(FLERR, "compute mad/property/coord cutoff", error);
+      if (iarg + 2 >= narg)
+        utils::missing_cmd_args(FLERR, "compute mad/property/coord cutoff", error);
       r1 = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
       r2 = utils::numeric(FLERR, arg[iarg + 2], false, lmp);
       iarg += 3;

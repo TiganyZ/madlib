@@ -1,3 +1,20 @@
+/* -*- c++ -*- ----------------------------------------------------------
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+------------------------------------------------------------------------- */
+
 // clang-format off
 /* Scattering factor tables for MADLIB.
    X-ray: Cromer-Mann f(s) = c + sum_j a_j exp(-b_j s^2), s = sin(theta)/lambda.

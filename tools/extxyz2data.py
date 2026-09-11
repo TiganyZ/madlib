@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """extended-xyz frame -> LAMMPS data file, keeping the triclinic cell."""
 import re, sys
 import numpy as np

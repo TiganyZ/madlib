@@ -1,3 +1,4 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 variable        bias index yes
 units           metal
 atom_style      atomic

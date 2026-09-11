@@ -1,11 +1,25 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "mad_target.h"
 
+#include "fmt/format.h"
+
 #include <cmath>
-#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -61,13 +75,10 @@ void MADTarget::set_grid(const std::vector<double> &x, bool weight_by_spacing)
   // Extrapolating a measured curve is never what the user meant.
   const double span = xraw.back() - xraw.front();
   const double tol = 1.0e-8 * span;
-  if (x.front() < xraw.front() - tol || x.back() > xraw.back() + tol) {
-    char buf[512];
-    snprintf(buf, sizeof(buf),
-             "MADLIB: prediction grid [%g, %g] is not inside the range [%g, %g] of target file %s",
-             x.front(), x.back(), xraw.front(), xraw.back(), fname.c_str());
-    fail(buf);
-  }
+  if ((x.front() < xraw.front() - tol) || (x.back() > xraw.back() + tol))
+    fail(fmt::format(
+        "MADLIB: prediction grid [{}, {}] is not inside the range [{}, {}] of target file {}",
+        x.front(), x.back(), xraw.front(), xraw.back(), fname));
 
   yexp.assign(nk, 0.0);
   size_t j = 0;

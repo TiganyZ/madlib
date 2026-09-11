@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "fix_mad_sq.h"
@@ -180,7 +193,8 @@ void FixMADSq::build_grid(const std::vector<double> &user_q)
     qg[k] = user_q[k];
     // x = 2 sin(theta)/lambda = q/2pi. Every wavevector below is 2 pi x, and
     // form factors are sampled at x/2.
-    xg[k] = q_in_angle ? 2.0 * sin(MY_PI * qg[k] / 180.0 / 2.0) / wavelength : qg[k] / (2.0 * MY_PI);
+    xg[k] = q_in_angle ? 2.0 * sin(MY_PI * qg[k] / 180.0 / 2.0) / wavelength
+                       : qg[k] / (2.0 * MY_PI);
   }
   if (ff) {
     std::vector<double> xv(xg, xg + nq);

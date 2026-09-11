@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "fix_mad.h"
@@ -174,12 +187,18 @@ double FixMAD::compute_scalar()
 double FixMAD::compute_vector(int n)
 {
   switch (n) {
-    case 0: return e_bias;
-    case 1: return target->rel_error();
-    case 2: return target->dissimilarity();
-    case 3: return gamma_now;
-    case 4: return target->scale();
-    case 5: return target->offset();
+    case 0:
+      return e_bias;
+    case 1:
+      return target->rel_error();
+    case 2:
+      return target->dissimilarity();
+    case 3:
+      return gamma_now;
+    case 4:
+      return target->scale();
+    case 5:
+      return target->offset();
   }
   return 0.0;
 }
@@ -195,9 +214,9 @@ void FixMAD::write_spectrum()
     fprintf(fp, "# MADLIB %s: x  y_pred  y_exp  (scale and offset applied)\n", style);
     wrote_header = true;
   }
-  fprintf(fp, "# step " BIGINT_FORMAT " gamma %.10g E %.10g rel_error %.10g scale %.10g offset %.10g\n",
-          update->ntimestep, gamma_now, e_bias, target->rel_error(), target->scale(),
-          target->offset());
+  fprintf(
+      fp, "# step " BIGINT_FORMAT " gamma %.10g E %.10g rel_error %.10g scale %.10g offset %.10g\n",
+      update->ntimestep, gamma_now, e_bias, target->rel_error(), target->scale(), target->offset());
   const double s = target->scale(), b = target->offset();
   for (int k = 0; k < nk; k++)
     // Enough digits that a reference check is limited by the calculation and

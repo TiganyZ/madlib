@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "mad_gap_file.h"
@@ -14,8 +27,8 @@ using namespace LAMMPS_NS;
 
 #ifdef MADLIB_TURBOGAP
 extern "C" {
-void madlib_soap_dim(int n_species, const int *alpha_max, int l_max, int compress,
-                     const char *mode, int *dim, int *nonzero);
+void madlib_soap_dim(int n_species, const int *alpha_max, int l_max, int compress, const char *mode,
+                     int *dim, int *nonzero);
 void madlib_compress_indices(int n_species, const int *alpha_max, int l_max, const char *mode,
                              int nonzero, int *p_i, int *p_j, double *p_el);
 }
@@ -28,7 +41,8 @@ static void madlib_soap_dim(int, const int *, int, int, const char *, int *, int
       "MADLIB: reading a .gap potential needs the Fortran backend: build lib/madlib and "
       "configure with -D MADLIB_ENABLE_TURBOGAP=on");
 }
-static void madlib_compress_indices(int, const int *, int, const char *, int, int *, int *, double *)
+static void madlib_compress_indices(int, const int *, int, const char *, int, int *, int *,
+                                    double *)
 {
 }
 #endif
@@ -138,8 +152,12 @@ std::vector<MADGapBlock> MADGapFile::read(const std::string &path, const std::st
   MADGapBlock b;
   bool has_lp = false;
 
-  auto num = [&](const std::string &v) { return std::stod(strip(v)); };
-  auto inum = [&](const std::string &v) { return (int) std::lround(std::stod(strip(v))); };
+  auto num = [&](const std::string &v) {
+    return std::stod(strip(v));
+  };
+  auto inum = [&](const std::string &v) {
+    return (int) std::lround(std::stod(strip(v)));
+  };
   auto vec = [&](const std::string &v) {
     std::vector<double> r;
     for (auto &w : words(v)) r.push_back(std::stod(w));
@@ -179,37 +197,64 @@ std::vector<MADGapBlock> MADGapFile::read(const std::string &path, const std::st
     std::replace(key.begin(), key.end(), ' ', '_');
 
     try {
-      if (key == "n_species") b.n_species = inum(val);
-      else if (key == "species") b.species = words(val);
-      else if (key == "central_species") b.central_species = inum(val);
-      else if (key == "rcut" || key == "rcut_hard") b.rcut_hard = vec(val);
-      else if (key == "buffer") b.buffer = vec(val);
-      else if (key == "atom_sigma_r") b.atom_sigma_r = vec(val);
-      else if (key == "atom_sigma_t") b.atom_sigma_t = vec(val);
-      else if (key == "atom_sigma_r_scaling") b.atom_sigma_r_scaling = vec(val);
-      else if (key == "atom_sigma_t_scaling") b.atom_sigma_t_scaling = vec(val);
-      else if (key == "amplitude_scaling") b.amplitude_scaling = vec(val);
-      else if (key == "central_weight") b.central_weight = vec(val);
-      else if (key == "global_scaling") b.global_scaling = vec(val);
-      else if (key == "nf") b.nf = vec(val);
-      else if (key == "n_max" || key == "alpha_max") b.alpha_max = ivec(val);
-      else if (key == "l_max") b.l_max = inum(val);
-      else if (key == "radial_enhancement") b.radial_enhancement = inum(val);
-      else if (key == "basis") b.basis = strip(val);
-      else if (key == "scaling_mode") b.scaling_mode = strip(val);
-      else if (key == "compress_soap") b.compress = (strip(val) == ".true." || strip(val) == "T");
-      else if (key == "compress_mode") b.compress_mode = strip(val);
-      else if (key == "file_compress" || key == "compress_file") b.compress_file = strip(val);
-      else if (key == "local_property_labels") { b.label = strip(val); has_lp = (b.label == label); }
-      else if (key == "local_property_qs") b.file_qs = strip(val);
-      else if (key == "local_property_alphas") b.file_alphas = strip(val);
-      else if (key == "local_property_zetas") b.zeta = num(val);
-      else if (key == "local_property_deltas") b.delta = num(val);
-      else if (key == "local_property_v0s") b.v0 = num(val);
+      if (key == "n_species")
+        b.n_species = inum(val);
+      else if (key == "species")
+        b.species = words(val);
+      else if (key == "central_species")
+        b.central_species = inum(val);
+      else if (key == "rcut" || key == "rcut_hard")
+        b.rcut_hard = vec(val);
+      else if (key == "buffer")
+        b.buffer = vec(val);
+      else if (key == "atom_sigma_r")
+        b.atom_sigma_r = vec(val);
+      else if (key == "atom_sigma_t")
+        b.atom_sigma_t = vec(val);
+      else if (key == "atom_sigma_r_scaling")
+        b.atom_sigma_r_scaling = vec(val);
+      else if (key == "atom_sigma_t_scaling")
+        b.atom_sigma_t_scaling = vec(val);
+      else if (key == "amplitude_scaling")
+        b.amplitude_scaling = vec(val);
+      else if (key == "central_weight")
+        b.central_weight = vec(val);
+      else if (key == "global_scaling")
+        b.global_scaling = vec(val);
+      else if (key == "nf")
+        b.nf = vec(val);
+      else if (key == "n_max" || key == "alpha_max")
+        b.alpha_max = ivec(val);
+      else if (key == "l_max")
+        b.l_max = inum(val);
+      else if (key == "radial_enhancement")
+        b.radial_enhancement = inum(val);
+      else if (key == "basis")
+        b.basis = strip(val);
+      else if (key == "scaling_mode")
+        b.scaling_mode = strip(val);
+      else if (key == "compress_soap")
+        b.compress = (strip(val) == ".true." || strip(val) == "T");
+      else if (key == "compress_mode")
+        b.compress_mode = strip(val);
+      else if (key == "file_compress" || key == "compress_file")
+        b.compress_file = strip(val);
+      else if (key == "local_property_labels") {
+        b.label = strip(val);
+        has_lp = (b.label == label);
+      } else if (key == "local_property_qs")
+        b.file_qs = strip(val);
+      else if (key == "local_property_alphas")
+        b.file_alphas = strip(val);
+      else if (key == "local_property_zetas")
+        b.zeta = num(val);
+      else if (key == "local_property_deltas")
+        b.delta = num(val);
+      else if (key == "local_property_v0s")
+        b.v0 = num(val);
       else if (key == "n_local_properties" && inum(val) != 1)
-        throw std::runtime_error(
-            "MADLIB: this block declares " + strip(val) +
-            " local properties; only one per block is supported so far");
+        throw std::runtime_error("MADLIB: this block declares " + strip(val) +
+                                 " local properties; only one per block is supported so far");
     } catch (std::invalid_argument &) {
       throw std::runtime_error("MADLIB: " + path + " line " + std::to_string(lineno) +
                                ": could not read a number from '" + strip(val) + "'");
@@ -247,7 +292,10 @@ std::vector<MADGapBlock> MADGapFile::read(const std::string &path, const std::st
                               blk.compress_mode.c_str(), blk.n_nonzero, blk.p_i.data(),
                               blk.p_j.data(), blk.p_el.data());
     else
-      for (int i = 0; i < blk.n_nonzero; i++) { blk.p_i[i] = i + 1; blk.p_j[i] = i + 1; }
+      for (int i = 0; i < blk.n_nonzero; i++) {
+        blk.p_i[i] = i + 1;
+        blk.p_j[i] = i + 1;
+      }
 
     load_sparse(blk, dir);
   }

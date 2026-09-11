@@ -1,3 +1,4 @@
+// Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 /* Drives the soap_turbo backend directly from an extended-xyz frame, with no
    LAMMPS anywhere, and prints one core-electron binding energy per atom.
    The frame carries TurboGAP's own values, so the comparison is exact. */

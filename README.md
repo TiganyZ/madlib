@@ -1,4 +1,4 @@
-# MADLIB — Molecular Augmented Dynamics for LAMMPS
+# MADLIB -- Molecular Augmented Dynamics for LAMMPS
 
 Bias a LAMMPS simulation towards experimental data. MADLIB predicts an
 observable from the current configuration, penalises the mismatch, and adds the
@@ -23,10 +23,10 @@ SOAP/GAP potential.
 | PDF `g(r)` / `D(r)` | working, validated |
 | `S(q)`, XRD, ND | working, validated |
 | **XPS**, and any spectrum from a broadened per-atom scalar | working, validated |
-| **The per-atom property layer** | working — `turbogap`, `coord` and `table` backends |
-| **TurboGAP `.gap` models, unchanged** | working — reproduces TurboGAP's own binding energies to 1.2e-9 relative |
-| Experimentally biased MC | working — via LAMMPS's own MC fixes, no new MC code |
-| **IR prediction** | working — agrees with GPUMD's pipeline to 1.5e-13, via TurboGAP |
+| **The per-atom property layer** | working -- `turbogap`, `coord` and `table` backends |
+| **TurboGAP `.gap` models, unchanged** | working -- reproduces TurboGAP's own binding energies to 1.2e-9 relative |
+| Experimentally biased MC | working -- via LAMMPS's own MC fixes, no new MC code |
+| **IR prediction** | working -- agrees with GPUMD's pipeline to 1.5e-13, via TurboGAP |
 | IR bias | not planned here; see the note under `fix mad/ir` |
 | ACE / MACE / GRACE / MLIAP property backends | next; the interface they plug into is done |
 
@@ -55,7 +55,7 @@ is switched on without kicking the structure apart on step one.
 **Size gamma from the unbiased dissimilarity.** Run once with `gamma 0.0`, read
 `f_xrd[3]`, and choose gamma so that `E = gamma*D/2` is a small fraction of the
 cohesive energy. Getting this wrong by two orders of magnitude is the commonest
-way to destroy a run, and it does not look like a failure — the dissimilarity
+way to destroy a run, and it does not look like a failure -- the dissimilarity
 falls obediently while the structure comes apart.
 
 ## Experimentally biased Monte Carlo
@@ -85,7 +85,7 @@ in upper-triangle row-major order.
 | keyword | default | meaning |
 |---|---|---|
 | `kde` | **required** | Gaussian width in Angstrom. A histogram has zero gradient, so a bias built on one applies no force; a missing or zero width is an error rather than a silent no-op. |
-| `rcut` | `rmax + trunc*kde` | neighbour cutoff. The default puts the hard cut far enough out that a pair crossing it changes nothing — see *Numerics* below. |
+| `rcut` | `rmax + trunc*kde` | neighbour cutoff. The default puts the hard cut far enough out that a pair crossing it changes nothing -- see *Numerics* below. |
 | `trunc` | `8.0` | Gaussian tails past this many sigma are dropped, an error of `exp(-32)`. |
 | `compat` | | `turbogap` reproduces TurboGAP's bin-lower-edge shell volume. |
 
@@ -107,7 +107,7 @@ picks the default weighting.
 | `output` | `raw` / `qFq` | `raw`, `F(q)`, `q*F(q)` |
 | `wavelength` | `1.5405981` | Angstrom, Cu K-alpha1 |
 | `window` | `lorch` | Lorch window damping the truncation ringing |
-| `window_cut` | `rmax` | its cutoff — the **transform range**, not the neighbour cutoff |
+| `window_cut` | `rmax` | its cutoff -- the **transform range**, not the neighbour cutoff |
 | `lp`, `polarization` | `no`, `1.0` | powder Lorentz-polarization factor |
 
 ### `compute ID group mad/property/*`
@@ -128,15 +128,15 @@ compute q  all mad/property/table file cebe.dat    # "atom-id value" per line
 `turbogap` evaluates `q_i = V0 + delta^2 sum_s alpha_s (soap_i . Q_s)^zeta` through
 soap_turbo, one block per central species. Fitting a core-electron-binding-energy
 model is months of work and there is no reason to refit one to move it, so the
-potential file is read as it stands — including the fact that its sparse-set
+potential file is read as it stands -- including the fact that its sparse-set
 paths are written relative to the directory TurboGAP was *run* from rather than
 to the file. Needs the Fortran backend; without it the style still exists and
 says what to build.
 
 `dipole` gives `mu_i = q_i r_i` from per-type charges or from `atom->q`, so any
 model that writes charges is a dipole model here. **`sum q_i r_i` is not defined
-in a periodic box** — it depends on the origin and on which images the atoms
-happen to be wrapped into — so a periodic run needs molecule IDs, and gets the
+in a periodic box** -- it depends on the origin and on which images the atoms
+happen to be wrapped into -- so a periodic run needs molecule IDs, and gets the
 sum of molecular dipoles built from intramolecular vectors; a periodic box
 without them is refused rather than given a plausible number.
 
@@ -171,13 +171,13 @@ u_l = sum_i exp( -(x_l - q_i)^2 / 2 sigma^2 ),   y = u / ||u||
 | `trunc` | `8.0` | Gaussian tails past this many sigma are dropped |
 
 Also registered as `fix mad/spectrum`, since nothing in it is specific to
-photoemission — any observable that is a broadened sum over a per-atom scalar
+photoemission -- any observable that is a broadened sum over a per-atom scalar
 fits.
 
 ### `fix ID group mad/ir <stride> <compute> [keyword value ...]`
 
 An infrared spectrum from the total dipole of a running trajectory, by
-Wiener–Khinchin.
+Wiener-Khinchin.
 
 ```lammps
 compute mu all mad/property/dipole charges 0.5 -0.5
@@ -187,25 +187,25 @@ fix     ir all mad/ir 2 c_mu nu_max 4000 acf_ratio 0.25 qc classical &
 
 | keyword | default | meaning |
 |---|---|---|
-| `nu_max` | `4000.0` | top of the returned range, cm⁻¹; refused above Nyquist |
+| `nu_max` | `4000.0` | top of the returned range, cm^-1; refused above Nyquist |
 | `acf_ratio` | `0.1` | fraction of the buffer kept as lags. **This sets the resolution.** |
 | `window` | `hann` | lag window: `hann`, `bartlett`, `welch`, `lorch`, `blackman`, `none` |
 | `qc` | `harmonic` | `harmonic`, `classical` (alias `quadratic`), `linear`, `none` |
 | `temp` | `300.0` | K, for `harmonic` |
-| `smooth` | `10 gaussian` | width in **bins**, not cm⁻¹; `gaussian` or `box` |
+| `smooth` | `10 gaussian` | width in **bins**, not cm^-1; `gaussian` or `box` |
 | `frame_dt` | | fs between frames, for a `rerun` where `update->dt` is not the interval |
 
 `compute_array` gives the spectrum as `(nu, intensity, power)`;
 `compute_vector` gives `{frames, lags, bin, Nyquist, peak}`.
 
-**Prediction only.** A bias is a much larger job — the spectrum is a functional
+**Prediction only.** A bias is a much larger job -- the spectrum is a functional
 of the whole trajectory while only the newest frame can still be moved, which
 is what forces TurboGAP's frozen-past adjoint and its three alternative
-estimators — and none of it is needed to report a spectrum.
+estimators -- and none of it is needed to report a spectrum.
 
 **The weighting is a physical choice, not a detail.** `harmonic` is
 `nu(1-exp(-hbar c nu/kT))`, `classical` is `nu^2`. They agree only for
-`hbar w << kT` — below about 208 cm⁻¹ at 300 K — and at 3400 cm⁻¹ the harmonic
+`hbar w << kT` -- below about 208 cm^-1 at 300 K -- and at 3400 cm^-1 the harmonic
 form is 16 times smaller relative to the librational region. That is a tilt
 across the range, so no overall scale absorbs it. Two spectra of one trajectory
 disagreeing about band heights is this before it is anything else.
@@ -223,7 +223,7 @@ neither is a property of the sample and both are easy to assume wrongly.
 
 `compute_vector` gives `{E, rel_error, dissimilarity, gamma, scale, offset}`.
 
-## Numerics — things that would otherwise be silently wrong
+## Numerics -- things that would otherwise be silently wrong
 
 Each of these is an error or a guard, not a warning, because each produces a
 plausible-looking answer:
@@ -234,7 +234,7 @@ plausible-looking answer:
 - **A prediction grid outside the target's range** would extrapolate a measured
   curve. Refused.
 - **A hard cut at `rmax`** lets a pair crossing it step the pattern. Invisible
-  in `g(r)` and lethal to the virial — it made the diagonal stress wrong by a
+  in `g(r)` and lethal to the virial -- it made the diagonal stress wrong by a
   factor of order one while the shear stayed perfect. The default `rcut` sits
   `trunc*kde` beyond `rmax` so the largest dropped contribution is `1e-14`.
 - **The Lorch window cutoff is the transform range, not the neighbour cutoff.**
@@ -249,7 +249,7 @@ plausible-looking answer:
 - **LAMMPS's once-per-timestep compute caching is wrong under MC.** An MC fix
   re-evaluates the energy several times within one timestep with different
   configurations, so a cached spectrum would price every trial move against the
-  first one — and the bias would simply never reach the Metropolis test, with
+  first one -- and the bias would simply never reach the Metropolis test, with
   no error anywhere. The pair pass is repeated instead.
 - **A serial run still has ghosts.** The property adjoint reaches neighbours of
   `i`, so it accumulates into a buffer over `nlocal+nghost` and reverse-
@@ -266,12 +266,12 @@ tests/run.sh gradients mpi   # a subset
 
 | leg | what it establishes |
 |---|---|
-| `forward` | partial `g_ab(r)` against an independent numpy reference — periodic images, triclinic cell, nothing shared with the C++ |
+| `forward` | partial `g_ab(r)` against an independent numpy reference -- periodic images, triclinic cell, nothing shared with the C++ |
 | `gradients` | forces and virial against central differences of MADLIB's own energy. The criterion is the **h-scan**: the error must fall as `h^2`, not merely be small. A wrong constant factor gives a flat curve that any single tolerance would pass. |
 | `invariants` | `E = gamma D / 2`; `sum_j f_j = 0` (a rigid translation cannot change any of these observables, so this catches a bad scatter or a bad reduction) |
 | `mpi` | 1 rank against 4: energy, forces and virial. The only test that catches every rank adding the volume term. |
 | `guards` | the three refusals above actually fire |
-| `md` | a biased run closes the gap — `rel_error` 0.99 to 0.04 |
+| `md` | a biased run closes the gap -- `rel_error` 0.99 to 0.04 |
 | `mc` | the bias reaches an unmodified LAMMPS MC fix's acceptance |
 | `xps` | the property layer end to end: invariants, the adjoint's reverse communication across ranks, and reverse Monte Carlo |
 | `gap` | the soap_turbo backend against TurboGAP's own numbers, its derivatives by finite differences, and rank-invariance. Skips cleanly when built without the backend. |
@@ -285,10 +285,10 @@ at the round-off floor.
 
 Measured: forward `g(r)` to `5e-15` and the XPS spectrum to `3e-16`; observed
 gradient order `2.02` on the soap_turbo chain; all four virial components to
-`1e-9`–`7e-6`; 1-vs-4-rank energy to `1e-16` (`1e-14` through the descriptor);
+`1e-9`-`7e-6`; 1-vs-4-rank energy to `1e-16` (`1e-14` through the descriptor);
 91 binding energies against TurboGAP to `1.2e-9` relative; XPS reverse MC
 `rel_error` 0.385 unbiased against 0.045 biased; the IR pipeline to `1.5e-13`
-over 29 configurations, and an IR band at 1402 cm⁻¹ against an analytic 1407.8.
+over 29 configurations, and an IR band at 1402 cm^-1 against an analytic 1407.8.
 
 ## Building
 
@@ -309,8 +309,8 @@ cmake ../cmake -D PKG_MADLIB=on -D PKG_MC=on -D BUILD_MPI=on \
                -D MADLIB_ENABLE_TURBOGAP=on
 ```
 
-The Fortran backend is off by default. It vendors seven files from TurboGAP —
-`kinds`, the five `soap_turbo_*`, and `local_properties`, about 6k lines — and
+The Fortran backend is off by default. It vendors seven files from TurboGAP  -- 
+`kinds`, the five `soap_turbo_*`, and `local_properties`, about 6k lines -- and
 needs LAPACK as well as BLAS, because soap_turbo's radial basis orthonormalises
 through `dgesvd` and `dpotrf`. `lib/madlib/Makefile` builds it standalone for a
 conventional-make LAMMPS or for testing.
@@ -321,6 +321,6 @@ The physics is TurboGAP's. `mad_scattering_data.h` is transcribed from
 `src/exp_utils.f90`; the observable definitions, the Ashcroft-Langreth partial
 structure factors and the output conventions follow `exp_interface.f90` and
 `docs/gle_mad.md`. Where MADLIB and TurboGAP differ deliberately, `compat
-turbogap` reproduces TurboGAP — including its single-precision constants, which
+turbogap` reproduces TurboGAP -- including its single-precision constants, which
 is why the X-ray form factors match it to `4e-16` in that mode and differ at the
 8th digit outside it.

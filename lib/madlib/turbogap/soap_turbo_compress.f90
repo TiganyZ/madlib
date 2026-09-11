@@ -97,9 +97,9 @@ module soap_turbo_compress_module
     counter = 0
     k = 1
 
-    do n = 1, n_max    
-      do m = n, n_max    
-        do l = 0, l_max    
+    do n = 1, n_max
+      do m = n, n_max
+        do l = 0, l_max
           if( any(n == pivot) .or. any(m == pivot) )then
             counter = counter + 1
             if( set_indices )then
@@ -225,7 +225,7 @@ module soap_turbo_compress_module
               end if
               ind = ind + 1
             end do
-          end if         
+          end if
         end do
       end do
     else if( .not. sym )then

@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "compute_mad_property_dipole.h"
@@ -30,7 +43,8 @@ ComputeMADPropertyDipole::ComputeMADPropertyDipole(LAMMPS *lmp, int narg, char *
   while (iarg < narg) {
     if (strcmp(arg[iarg], "charges") == 0) {
       const int nt = atom->ntypes;
-      if (iarg + nt >= narg) utils::missing_cmd_args(FLERR, "compute mad/property/dipole charges", error);
+      if (iarg + nt >= narg)
+        utils::missing_cmd_args(FLERR, "compute mad/property/dipole charges", error);
       memory->create(bytype, nt + 1, "mad/property/dipole:bytype");
       for (int t = 1; t <= nt; t++) bytype[t] = utils::numeric(FLERR, arg[iarg + t], false, lmp);
       iarg += nt + 1;
@@ -112,11 +126,17 @@ void ComputeMADPropertyDipole::check_neutrality()
   double worst = 0.0;
   tagint worst_id = 0;
   for (auto &kv : q)
-    if (fabs(kv.second) > fabs(worst)) { worst = kv.second; worst_id = kv.first; }
+    if (fabs(kv.second) > fabs(worst)) {
+      worst = kv.second;
+      worst_id = kv.first;
+    }
 
   // Molecules can straddle ranks, so the per-rank partials are not the answer;
   // reduce the extreme and let one rank speak.
-  struct { double v; int r; } in{fabs(worst), comm->me}, out;
+  struct {
+    double v;
+    int r;
+  } in{fabs(worst), comm->me}, out;
   MPI_Allreduce(&in, &out, 1, MPI_DOUBLE_INT, MPI_MAXLOC, world);
   double check = 0.0;
   if (comm->me == out.r) check = worst;

@@ -1,3 +1,4 @@
+// Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 /* Drives the MADLIB IR pipeline on a dipole file, in the same CLI shape as
    TurboGAP's irfftverify, so the two can be compared directly. */
 #include "../src/MADLIB/mad_ir_spectrum.h"

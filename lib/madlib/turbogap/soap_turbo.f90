@@ -644,7 +644,7 @@ module soap_turbo_desc
     allocate( skip_soap_component_flattened_prev(1:size(skip_soap_component_flattened)) )
     skip_soap_component_flattened_prev = skip_soap_component_flattened
   end if
-     
+
   if( recompute_multiplicity_array )then
     counter = 0
     counter2 = 0
@@ -1877,7 +1877,7 @@ module soap_turbo_desc
         k2 = k2 + 1
         j = neighbors_list(k2)
         if( k == 1 )then
-          i3 = j 
+          i3 = j
         end if
 !        if( k == 1 )then
 !          do i2 = 1, species_multiplicity_supercell(i)

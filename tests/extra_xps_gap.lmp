@@ -1,3 +1,4 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 comm_modify     cutoff 6.0
 compute cebe all mad/property/turbogap data/gap_files/CO.gap core_electron_be species C O
 fix     mad  all mad/xps c_cebe target data/xps_gap_target.dat energy 280.0 540.0 521 &

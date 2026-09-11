@@ -1,5 +1,18 @@
 /* -*- c++ -*- ----------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #ifndef LMP_MAD_GAP_FILE_H
@@ -44,7 +57,7 @@ struct MADGapBlock {
   std::string file_qs, file_alphas;
   double zeta = 1.0, delta = 1.0, v0 = 0.0;
   int n_sparse = 0, dim = 0, n_nonzero = 0;
-  std::vector<double> qs;        // (dim x n_sparse), column-major as Fortran wants
+  std::vector<double> qs;    // (dim x n_sparse), column-major as Fortran wants
   std::vector<double> alphas;
   std::vector<int> p_i, p_j;
   std::vector<double> p_el;

@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "mad_ir_spectrum.h"
@@ -104,10 +117,16 @@ static void lag_window(const std::string &kind, int L, std::vector<double> &w)
   } else if (kind == "bartlett") {
     for (int t = 0; t < L; t++) w[t] = 1.0 - t / (double) L;
   } else if (kind == "welch") {
-    for (int t = 0; t < L; t++) { const double x = t / (double) L; w[t] = 1.0 - x * x; }
+    for (int t = 0; t < L; t++) {
+      const double x = t / (double) L;
+      w[t] = 1.0 - x * x;
+    }
   } else if (kind == "lorch") {
     w[0] = 1.0;
-    for (int t = 1; t < L; t++) { const double x = M_PI * t / (double) L; w[t] = sin(x) / x; }
+    for (int t = 1; t < L; t++) {
+      const double x = M_PI * t / (double) L;
+      w[t] = sin(x) / x;
+    }
   } else {    // hann
     for (int t = 0; t < L; t++) w[t] = 0.5 * (cos(M_PI * t / (double) L) + 1.0);
   }
@@ -132,7 +151,8 @@ static bool prefactor(const std::string &kind, double temperature, const std::ve
       pref[k] = nu[k] * (1.0 - exp(-x));
     }
   } else {
-    err = "MADLIB: quantum correction must be harmonic, classical (alias quadratic), linear or none";
+    err =
+        "MADLIB: quantum correction must be harmonic, classical (alias quadratic), linear or none";
     return false;
   }
   return true;
@@ -143,7 +163,10 @@ static void smooth_gaussian(const std::vector<double> &x, int k, std::vector<dou
   const int n = (int) x.size();
   const double sigma = k / 2.355;
   const int radius = (int) (4.0 * sigma + 0.5);
-  if (radius < 1) { y = x; return; }
+  if (radius < 1) {
+    y = x;
+    return;
+  }
 
   std::vector<double> wk(2 * radius + 1);
   double s = 0.0;
@@ -171,7 +194,10 @@ static int smooth_box(const std::vector<double> &x, int k, std::vector<double> &
 {
   const int n = (int) x.size();
   const int n_out = n - k + 1;
-  if (n_out < 1) { y = x; return n; }
+  if (n_out < 1) {
+    y = x;
+    return n;
+  }
   y.assign(n_out, 0.0);
   for (int j = 0; j < n_out; j++) {
     double acc = 0.0;
@@ -187,8 +213,14 @@ bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfi
                                 MADIrResult &res, std::string &err)
 {
   err.clear();
-  if (n_frames < 2) { err = "MADLIB: an IR spectrum needs at least two stored frames"; return false; }
-  if (cfg.dt_fs <= 0.0) { err = "MADLIB: the stored-frame interval must be positive"; return false; }
+  if (n_frames < 2) {
+    err = "MADLIB: an IR spectrum needs at least two stored frames";
+    return false;
+  }
+  if (cfg.dt_fs <= 0.0) {
+    err = "MADLIB: the stored-frame interval must be positive";
+    return false;
+  }
   if (cfg.acf_ratio <= 0.0 || cfg.acf_ratio > 1.0) {
     err = "MADLIB: ir acf_ratio must be in (0, 1]";
     return false;
@@ -217,8 +249,10 @@ bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfi
   // disagreement at some grids and not others.
   int k_max = -1;
   for (int k = 0; k < L; k++) {
-    if (k * dnu <= cfg.max_freq_cm) k_max = k;
-    else break;
+    if (k * dnu <= cfg.max_freq_cm)
+      k_max = k;
+    else
+      break;
   }
   if (k_max < 1) {
     err = "MADLIB: the bin spacing is " + std::to_string(dnu) +
@@ -240,7 +274,10 @@ bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfi
   if (!prefactor(cfg.quantum_correction, cfg.temperature, nu, pref, err)) return false;
 
   std::vector<double> inten(n_out), pw(n_out);
-  for (int k = 0; k < n_out; k++) { inten[k] = pref[k] * M[k]; pw[k] = M[k]; }
+  for (int k = 0; k < n_out; k++) {
+    inten[k] = pref[k] * M[k];
+    pw[k] = M[k];
+  }
 
   int n_box = n_out;
   if (cfg.smooth_k > 1 && n_out > cfg.smooth_k) {

@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "compute_mad_property_table.h"
@@ -27,13 +40,14 @@ ComputeMADPropertyTable::ComputeMADPropertyTable(LAMMPS *lmp, int narg, char **a
   while (iarg < narg) {
     if (strcmp(arg[iarg], "values") == 0) {
       const int nt = atom->ntypes;
-      if (iarg + nt >= narg) utils::missing_cmd_args(FLERR, "compute mad/property/table values", error);
+      if (iarg + nt >= narg)
+        utils::missing_cmd_args(FLERR, "compute mad/property/table values", error);
       memory->create(bytype, nt + 1, "mad/property/table:bytype");
-      for (int t = 1; t <= nt; t++)
-        bytype[t] = utils::numeric(FLERR, arg[iarg + t], false, lmp);
+      for (int t = 1; t <= nt; t++) bytype[t] = utils::numeric(FLERR, arg[iarg + t], false, lmp);
       iarg += nt + 1;
     } else if (strcmp(arg[iarg], "file") == 0) {
-      if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "compute mad/property/table file", error);
+      if (iarg + 1 >= narg)
+        utils::missing_cmd_args(FLERR, "compute mad/property/table file", error);
       read_file(arg[iarg + 1]);
       iarg += 2;
     } else {
@@ -41,8 +55,7 @@ ComputeMADPropertyTable::ComputeMADPropertyTable(LAMMPS *lmp, int narg, char **a
     }
   }
 
-  if (!bytype && !byid)
-    error->all(FLERR, "compute mad/property/table needs either values or file");
+  if (!bytype && !byid) error->all(FLERR, "compute mad/property/table needs either values or file");
 }
 
 ComputeMADPropertyTable::~ComputeMADPropertyTable()

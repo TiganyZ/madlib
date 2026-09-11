@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """Finite-difference check of a MADLIB bias: forces and virial from its own energy.
 
 Displaces single coordinates and strains the cell, differences the reported

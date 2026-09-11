@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "mad_form_factors.h"
@@ -68,6 +81,5 @@ void MADFormFactors::tabulate(const std::vector<double> &x)
   nsamples = (int) x.size();
   table.assign(species.size() * nsamples, 0.0);
   for (size_t a = 0; a < species.size(); a++)
-    for (int k = 0; k < nsamples; k++)
-      table[a * nsamples + k] = evaluate(species[a], 0.5 * x[k]);
+    for (int k = 0; k < nsamples; k++) table[a * nsamples + k] = evaluate(species[a], 0.5 * x[k]);
 }

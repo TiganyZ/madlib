@@ -1,5 +1,18 @@
 /* ----------------------------------------------------------------------
-   MADLIB - Molecular Augmented Dynamics for LAMMPS
+   LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
+
+   Copyright (2003) Sandia Corporation.  Under the terms of Contract
+   DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
+   certain rights in this software.  This software is distributed under
+   the GNU General Public License.
+
+   See the README file in the top-level LAMMPS directory.
+------------------------------------------------------------------------- */
+
+/* ----------------------------------------------------------------------
+   Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
 #include "compute_mad_property_turbogap.h"
@@ -22,16 +35,17 @@
 using namespace LAMMPS_NS;
 
 #ifdef MADLIB_TURBOGAP
-extern "C" void madlib_local_property(
-    int n_sites, int n_pairs, int n_species, const int *n_neigh, const int *species_idx,
-    const double *rjs, const double *thetas, const double *phis, const int *alpha_max, int l_max,
-    const double *rcut_hard, const double *rcut_soft, const double *nf,
-    const double *global_scaling, const double *asr, const double *asrs, const double *ast,
-    const double *asts, const double *amp, int radial_enhancement, const double *cw,
-    const char *basis, const char *scaling_mode, int compress, int n_nonzero, const int *p_i,
-    const int *p_j, const double *p_el, int dim, int n_sparse, const double *qs,
-    const double *alphas, double v0, double delta, double zeta, int do_derivatives, double *v,
-    double *v_der);
+extern "C" void
+madlib_local_property(int n_sites, int n_pairs, int n_species, const int *n_neigh,
+                      const int *species_idx, const double *rjs, const double *thetas,
+                      const double *phis, const int *alpha_max, int l_max, const double *rcut_hard,
+                      const double *rcut_soft, const double *nf, const double *global_scaling,
+                      const double *asr, const double *asrs, const double *ast, const double *asts,
+                      const double *amp, int radial_enhancement, const double *cw,
+                      const char *basis, const char *scaling_mode, int compress, int n_nonzero,
+                      const int *p_i, const int *p_j, const double *p_el, int dim, int n_sparse,
+                      const double *qs, const double *alphas, double v0, double delta, double zeta,
+                      int do_derivatives, double *v, double *v_der);
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -54,7 +68,8 @@ ComputeMADPropertyTurbogap::ComputeMADPropertyTurbogap(LAMMPS *lmp, int narg, ch
   while (iarg < narg) {
     if (strcmp(arg[iarg], "species") == 0) {
       const int nt = atom->ntypes;
-      if (iarg + nt >= narg) utils::missing_cmd_args(FLERR, "compute mad/property/turbogap species", error);
+      if (iarg + nt >= narg)
+        utils::missing_cmd_args(FLERR, "compute mad/property/turbogap species", error);
       for (int t = 0; t < nt; t++) labels.emplace_back(arg[iarg + 1 + t]);
       iarg += nt + 1;
     } else {
@@ -77,13 +92,16 @@ ComputeMADPropertyTurbogap::ComputeMADPropertyTurbogap(LAMMPS *lmp, int narg, ch
     for (size_t s = 0; s < blocks[0].species.size(); s++)
       if (blocks[0].species[s] == labels[t - 1]) type2species[t] = (int) s + 1;
     if (type2species[t] == 0)
-      error->all(FLERR, "compute mad/property/turbogap: atom type {} is '{}', which the potential "
-                        "does not define", t, labels[t - 1]);
+      error->all(FLERR,
+                 "compute mad/property/turbogap: atom type {} is '{}', which the potential "
+                 "does not define",
+                 t, labels[t - 1]);
   }
   for (auto &b : blocks) {
     if (b.species != blocks[0].species)
-      error->all(FLERR, "compute mad/property/turbogap: the soap_turbo blocks disagree about the "
-                        "species list");
+      error->all(FLERR,
+                 "compute mad/property/turbogap: the soap_turbo blocks disagree about the "
+                 "species list");
     rcut = MAX(rcut, b.rcut_max());
   }
   rcutsq = rcut * rcut;
@@ -152,8 +170,14 @@ void ComputeMADPropertyTurbogap::build_batches(bool derivatives)
     const double rc = blocks[ib].rcut_max();
     const double rcsq = rc * rc;
 
-    B.n_neigh.clear(); B.species_idx.clear(); B.jatom.clear(); B.site_atom.clear();
-    B.rjs.clear(); B.thetas.clear(); B.phis.clear(); B.xyz.clear();
+    B.n_neigh.clear();
+    B.species_idx.clear();
+    B.jatom.clear();
+    B.site_atom.clear();
+    B.rjs.clear();
+    B.thetas.clear();
+    B.phis.clear();
+    B.xyz.clear();
 
     for (int ii = 0; ii < list->inum; ii++) {
       const int i = ilist[ii];
@@ -163,7 +187,9 @@ void ComputeMADPropertyTurbogap::build_batches(bool derivatives)
       B.site_atom.push_back(i);
       int cnt = 1;
       B.species_idx.push_back(cs);
-      B.rjs.push_back(0.0); B.thetas.push_back(0.0); B.phis.push_back(0.0);
+      B.rjs.push_back(0.0);
+      B.thetas.push_back(0.0);
+      B.phis.push_back(0.0);
       B.jatom.push_back(i);
       B.xyz.insert(B.xyz.end(), {0.0, 0.0, 0.0});
 
@@ -223,16 +249,15 @@ void ComputeMADPropertyTurbogap::compute_property()
     const int ns = (int) B.n_neigh.size(), np = (int) B.rjs.size();
     if (ns == 0) continue;
 
-    madlib_local_property(ns, np, b.n_species, B.n_neigh.data(), B.species_idx.data(),
-                          B.rjs.data(), B.thetas.data(), B.phis.data(), b.alpha_max.data(),
-                          b.l_max, b.rcut_hard.data(), b.rcut_soft.data(), b.nf.data(),
-                          b.global_scaling.data(), b.atom_sigma_r.data(),
-                          b.atom_sigma_r_scaling.data(), b.atom_sigma_t.data(),
-                          b.atom_sigma_t_scaling.data(), b.amplitude_scaling.data(),
-                          b.radial_enhancement, b.central_weight.data(), b.basis.c_str(),
-                          b.scaling_mode.c_str(), b.compress ? 1 : 0, b.n_nonzero, b.p_i.data(),
-                          b.p_j.data(), b.p_el.data(), b.dim, b.n_sparse, b.qs.data(),
-                          b.alphas.data(), b.v0, b.delta, b.zeta, 1, B.q.data(), B.qder.data());
+    madlib_local_property(
+        ns, np, b.n_species, B.n_neigh.data(), B.species_idx.data(), B.rjs.data(), B.thetas.data(),
+        B.phis.data(), b.alpha_max.data(), b.l_max, b.rcut_hard.data(), b.rcut_soft.data(),
+        b.nf.data(), b.global_scaling.data(), b.atom_sigma_r.data(), b.atom_sigma_r_scaling.data(),
+        b.atom_sigma_t.data(), b.atom_sigma_t_scaling.data(), b.amplitude_scaling.data(),
+        b.radial_enhancement, b.central_weight.data(), b.basis.c_str(), b.scaling_mode.c_str(),
+        b.compress ? 1 : 0, b.n_nonzero, b.p_i.data(), b.p_j.data(), b.p_el.data(), b.dim,
+        b.n_sparse, b.qs.data(), b.alphas.data(), b.v0, b.delta, b.zeta, 1, B.q.data(),
+        B.qder.data());
 
     for (int s = 0; s < ns; s++) vector_atom[B.site_atom[s]] = B.q[s];
   }
@@ -288,6 +313,7 @@ void ComputeMADPropertyTurbogap::adjoint(double **lambda, double *virial)
 double ComputeMADPropertyTurbogap::memory_usage()
 {
   double n = ComputeMADProperty::memory_usage();
-  for (auto &B : batch) n += (double) (B.qder.capacity() + B.xyz.capacity() + B.rjs.capacity() * 3) * sizeof(double);
+  for (auto &B : batch)
+    n += (double) (B.qder.capacity() + B.xyz.capacity() + B.rjs.capacity() * 3) * sizeof(double);
   return n;
 }

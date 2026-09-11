@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """An independent partial pair distribution, for checking compute mad/pdf.
 
 Deliberately naive: build every periodic image inside the cutoff by brute force

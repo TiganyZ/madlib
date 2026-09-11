@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """An independent smooth coordination number and XPS spectrum.
 
 Shares nothing with the C++: brute-force periodic images, the raised-cosine

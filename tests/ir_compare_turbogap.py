@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """Head-to-head between MADLIB's IR pipeline and TurboGAP's ir_fft.f90.
 
 TurboGAP's is a translation of GPUMD's TNEP/spectroscopy.py and is verified
