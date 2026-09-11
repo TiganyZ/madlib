@@ -39,7 +39,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap ir quip}
+want=${*:-forward gradients invariants mpi guards md mc xps gap ir quip torch}
 
 for w in $want; do
 case $w in
@@ -154,6 +154,43 @@ print(f"    rel_error {rel[0]:.4f} -> {rel[-1]:.4f} over {len(rel)} samples")
 sys.exit(0 if rel[-1] < 0.25 * rel[0] else 1)
 PY
   if [ $? -eq 0 ]; then ok "the bias closes the gap"; else bad "rel_error did not fall"; fi
+  ;;
+
+torch)
+  leg "a model written in Python, differentiated by autograd"
+  if ! $LMP -h 2>/dev/null | grep -q "mad/property/python"; then
+    echo "    SKIP: built without the embedded interpreter"
+  elif ! $PYTHON -c "import torch" 2>/dev/null; then
+    echo "    SKIP: torch not installed"
+  else
+    export PYTHONPATH=$PWD
+    $LMP -in in.torch_ref -log none >/dev/null 2>&1 && mv -f torch_q.dump coord_q.dump
+    $LMP -in in.torch -log none >/dev/null 2>&1
+    $PYTHON - <<'PY'
+import sys
+import numpy as np
+def rd(f):
+    rows = [l.split() for l in open(f).read().split("ITEM: ATOMS")[-1].split("\n")[1:]
+            if len(l.split()) == 2]
+    return np.array([float(r[1]) for r in sorted(rows, key=lambda r: int(r[0]))])
+a, b = rd("coord_q.dump"), rd("torch_q.dump")
+d = np.abs(a - b).max()
+print(f"    {len(a)} values, mean {a.mean():.6f}: max |torch - C++| = {d:.2e}")
+sys.exit(0 if d < 1e-10 else 1)
+PY
+    if [ $? -eq 0 ]; then ok "the torch model reproduces the C++ one"
+    else bad "the torch model disagrees with the C++ one"; fi
+
+    leg "the autograd adjoint, by finite differences"
+    if $PYTHON fd_gradient.py data/gc91.data extra_xps_torch.lmp --lmp "$LMP" \
+         --atoms 2 --hs 1e-3,3e-4,1e-4 --paircut 7.5 >/tmp/fd_torch.log 2>&1; then
+      grep -E "ratio|observed order|analytic W" /tmp/fd_torch.log | sed 's/^/     /'
+      ok "one backward pass gives the right force"
+    else
+      sed 's/^/     /' /tmp/fd_torch.log | tail -16
+      bad "the autograd adjoint is wrong"
+    fi
+  fi
   ;;
 
 quip)

@@ -1,0 +1,14 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute q all mad/property/coord cutoff 1.7 2.1
+dump d all custom 1 torch_q.dump id c_q
+dump_modify d format float %.14f sort id
+run 0

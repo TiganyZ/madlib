@@ -1,4 +1,5 @@
 .. index:: compute mad/property/coord
+.. index:: compute mad/property/python
 .. index:: compute mad/property/dipole
 .. index:: compute mad/property/table
 .. index:: compute mad/property/turbogap
@@ -7,6 +8,9 @@ compute mad/property/coord command
 ==================================
 
 compute mad/property/dipole command
+===================================
+
+compute mad/property/python command
 ===================================
 
 compute mad/property/table command
@@ -23,8 +27,8 @@ Syntax
    compute ID group-ID style keyword values ...
 
 * ID, group-ID are documented in :doc:`compute <compute>` command
-* style = *mad/property/coord* or *mad/property/dipole* or *mad/property/table*
-  or *mad/property/turbogap*
+* style = *mad/property/coord* or *mad/property/dipole* or *mad/property/python*
+  or *mad/property/table* or *mad/property/turbogap*
 
   .. parsed-literal::
 
@@ -35,6 +39,11 @@ Syntax
          *charges* values = one charge per atom type (charge units)
          *charge* = take the charges from the atom style instead
          *neutral_tol* value = largest net charge tolerated
+
+       *mad/property/python* args = module keyword values
+         module = name of an importable Python module
+         *ncomp* value = 1 or 3 = components of the property
+         *cutoff* value = neighbor list cutoff (distance units)
 
        *mad/property/table*:
          *values* = one value per atom type
@@ -54,6 +63,7 @@ Examples
    compute mu   all mad/property/dipole charges 0.5 -0.5
    compute cn   all mad/property/coord cutoff 1.7 2.1
    compute q    all mad/property/table file cebe.dat
+   compute qml  all mad/property/python my_mace_model ncomp 1 cutoff 5.0
 
 Description
 """""""""""
@@ -101,6 +111,23 @@ therefore requires an atom style with molecule IDs, and the dipole is then the
 sum of molecular dipoles built from intramolecular vectors, which does not move
 with the origin.  A periodic box without molecule IDs is an error.
 
+*mad/property/python* calls a model written in Python, so any framework
+reachable from there is a backend: MACE, GRACE, a torch module, a plain numpy
+expression.  The module must provide two functions,
+
+.. code-block:: python
+
+   mad_compute(positions, types, edge_i, edge_j, nlocal, ncomp) -> q
+   mad_adjoint(positions, types, edge_i, edge_j, nlocal, ncomp, lam) -> f
+
+with *q* of shape (nlocal,) or (nlocal, ncomp), and *f* of shape (nall, 3) equal
+to the negative gradient of the weighted sum of *q* -- one backward pass for a
+torch model.  The positions cover owned atoms and ghosts, and a ghost carries
+the position of the periodic image it stands for, so the edge list and these
+coordinates fix the geometry completely; no cell and no boundary conditions are
+passed, and the model does not need to know about domain decomposition.  Arrays
+cross as memoryviews over LAMMPS's own storage and nothing is copied.
+
 *mad/property/coord* gives a smooth coordination number, one below *r1*, a
 raised cosine to *r2*, and zero beyond.  It has an analytic gradient and needs no
 model files, so it is useful for checking a bias end to end before a fitted model
@@ -126,10 +153,13 @@ was built with that package.  See the :doc:`Build package <Build_package>` doc
 page for more info.
 
 *mad/property/turbogap* additionally requires the optional Fortran backend in
-``lib/madlib``, selected with ``-D MADLIB_ENABLE_TURBOGAP=on``.  Without it the
-style still exists and reports what to build.
+``lib/madlib``, selected with ``-D MADLIB_ENABLE_TURBOGAP=on``, and
+*mad/property/python* the embedded interpreter, selected with
+``-D MADLIB_ENABLE_PYTHON=on``.  Without them the styles still exist and report
+what to build.
 
-For *mad/property/coord* and *mad/property/turbogap*, the cutoff plus the
+For *mad/property/coord*, *mad/property/python* and *mad/property/turbogap*,
+the cutoff plus the
 neighbor skin must be within the communication cutoff; when it is not, the
 compute stops with a message naming the :doc:`comm_modify <comm_modify>`
 *cutoff* option.

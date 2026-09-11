@@ -28,7 +28,8 @@ SOAP/GAP potential.
 | Experimentally biased MC | working -- via LAMMPS's own MC fixes, no new MC code |
 | **IR prediction** | working -- agrees with GPUMD's pipeline to 1.5e-13, via TurboGAP |
 | IR bias | not planned here; see the note under `fix mad/ir` |
-| ACE / MACE / GRACE / MLIAP property backends | next; the interface they plug into is done |
+| **Python / torch property backend** | working -- MACE, GRACE, any torch model, differentiated by autograd |
+| MLIAP property backend | in progress |
 
 Built against LAMMPS `stable_22Jul2025_update6`.
 
@@ -120,6 +121,9 @@ IR will need local dipoles. Two backends so far:
 compute q  all mad/property/turbogap gap_files/CO.gap core_electron_be species C O
 
 compute mu all mad/property/dipole charges 0.5 -0.5  # or 'charge' to use atom->q
+# any model reachable from Python: MACE, GRACE, a torch module
+compute q  all mad/property/python my_model ncomp 1 cutoff 5.0
+
 compute cn all mad/property/coord cutoff 1.7 2.1     # smooth coordination number
 compute q  all mad/property/table values 290.0 536.0
 compute q  all mad/property/table file cebe.dat    # "atom-id value" per line
@@ -276,6 +280,7 @@ tests/run.sh gradients mpi   # a subset
 | `xps` | the property layer end to end: invariants, the adjoint's reverse communication across ranks, and reverse Monte Carlo |
 | `gap` | the soap_turbo backend against TurboGAP's own numbers, its derivatives by finite differences, and rank-invariance. Skips cleanly when built without the backend. |
 | `ir` | the spectrum pipeline against TurboGAP's `ir_fft` over 29 configurations, a vibrational band against the force constant that produced it, the molecular dipole across ranks, and the periodic refusal |
+| `torch` | a model written in Python against the C++ one it reimplements, and its autograd adjoint by finite differences |
 | `quip` | the bias running on a real GAP potential through `pair_style quip`, cross-checked against `quippy`, and a biased run closing the gap on it. Skips cleanly without ML-QUIP or the potentials. |
 
 The gradient legs report an **observed convergence order**, not a tolerance at

@@ -11,6 +11,14 @@
 # list in cmake/CMakeLists.txt -- being in STANDARD_PACKAGES is not enough.
 
 set(MADLIB_ENABLE_TURBOGAP OFF CACHE BOOL "Build the soap_turbo local-property backend")
+set(MADLIB_ENABLE_PYTHON OFF CACHE BOOL "Build the embedded-Python local-property backend")
+
+if(MADLIB_ENABLE_PYTHON)
+  find_package(Python REQUIRED COMPONENTS Interpreter Development.Embed)
+  target_link_libraries(lammps PRIVATE Python::Python)
+  target_compile_definitions(lammps PRIVATE -DMADLIB_PYTHON)
+  message(STATUS "MADLIB: embedded-Python backend enabled (${Python_VERSION})")
+endif()
 
 if(MADLIB_ENABLE_TURBOGAP)
   enable_language(Fortran)
