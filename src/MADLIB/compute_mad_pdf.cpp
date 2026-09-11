@@ -189,11 +189,11 @@ void ComputeMADPdf::init()
                "comm_modify cutoff command to increase it",
                rcut + skin, cutghost);
 
-  if ((neighbor->style == Neighbor::MULTI) || (neighbor->style == Neighbor::MULTI_OLD))
-    error->all(FLERR, "compute mad/pdf requires neighbor style 'bin' or 'nsq'");
+  if (neighbor->style == Neighbor::MULTI)
+    error->all(FLERR, "compute mad/pdf with a custom cutoff requires neighbor style 'bin' or 'nsq'");
 
   auto *req = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
-  req->set_cutoff(rcut + skin);
+  req->set_cutoff_fixed(rcut + skin);
 }
 
 void ComputeMADPdf::init_list(int /*id*/, NeighList *ptr)

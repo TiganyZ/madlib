@@ -31,7 +31,8 @@ SOAP/GAP potential.
 | **Python / torch property backend** | working -- MACE, GRACE, any torch model, differentiated by autograd |
 | **MLIAP property backend** | working -- SNAP, SO3, ACE descriptors with linear, quadratic or NN models |
 
-Built against LAMMPS `stable_22Jul2025_update6`.
+Built against LAMMPS `develop` (2 Sep 2026). A version at least as new as
+`patch_10Sep2025` is required, because `pair_style symmetrix/mace` needs one.
 
 ## Quick start
 
@@ -344,6 +345,18 @@ cmake ../cmake -D PKG_MADLIB=on -D PKG_ML-QUIP=on \
 Measured on the 91-atom cell: energy and forces through LAMMPS agree with
 `quippy` on the same frame to `9e-8` eV and `3.7e-8` eV/A, and a biased run
 takes the relative error from 2.88 to 0.44.
+
+MACE is available the same way, through
+[symmetrix](https://github.com/wcwitt/symmetrix)'s `pair_style symmetrix/mace`,
+which is a C++ MACE needing no torch at run time. Its `pair_symmetrix/install.sh`
+patches a LAMMPS checkout; build with `-D CMAKE_CXX_STANDARD=20`, and
+`-D SYMMETRIX_KOKKOS=off` unless you have fetched its Kokkos submodules for a
+GPU build.
+
+`tools/register_madlib.py` does the LAMMPS-side registration and is idempotent,
+so it can be re-run after a LAMMPS update. One script,
+`install_turbogap_lammps.sh`, builds the whole stack -- LAMMPS, QUIP, symmetrix,
+MADLIB and a Python environment -- on CPU or GPU.
 
 ### The Fortran backend
 

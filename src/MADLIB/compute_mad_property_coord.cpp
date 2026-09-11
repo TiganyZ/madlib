@@ -84,7 +84,7 @@ void ComputeMADPropertyCoord::init()
                r2 + skin, cutghost);
 
   auto *req = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
-  req->set_cutoff(r2 + skin);
+  req->set_cutoff_fixed(r2 + skin);
 }
 
 void ComputeMADPropertyCoord::init_list(int /*id*/, NeighList *ptr)

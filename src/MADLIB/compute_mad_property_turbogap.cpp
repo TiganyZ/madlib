@@ -139,7 +139,7 @@ void ComputeMADPropertyTurbogap::init()
                rcut + skin, cutghost);
 
   auto *req = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_OCCASIONAL);
-  req->set_cutoff(rcut + skin);
+  req->set_cutoff_fixed(rcut + skin);
 }
 
 void ComputeMADPropertyTurbogap::init_list(int /*id*/, NeighList *ptr)
