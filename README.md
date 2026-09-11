@@ -276,6 +276,7 @@ tests/run.sh gradients mpi   # a subset
 | `xps` | the property layer end to end: invariants, the adjoint's reverse communication across ranks, and reverse Monte Carlo |
 | `gap` | the soap_turbo backend against TurboGAP's own numbers, its derivatives by finite differences, and rank-invariance. Skips cleanly when built without the backend. |
 | `ir` | the spectrum pipeline against TurboGAP's `ir_fft` over 29 configurations, a vibrational band against the force constant that produced it, the molecular dipole across ranks, and the periodic refusal |
+| `quip` | the bias running on a real GAP potential through `pair_style quip`, cross-checked against `quippy`, and a biased run closing the gap on it. Skips cleanly without ML-QUIP or the potentials. |
 
 The gradient legs report an **observed convergence order**, not a tolerance at
 each step. A large `h` legitimately has a large truncation error, and demanding
@@ -309,11 +310,46 @@ cmake ../cmake -D PKG_MADLIB=on -D PKG_MC=on -D BUILD_MPI=on \
                -D MADLIB_ENABLE_TURBOGAP=on
 ```
 
+### Verifying against a real potential
+
+Every other leg runs on `pair_style zero`, which isolates the bias but says
+nothing about whether it composes with real physics. The `quip` leg does that:
+a fitted GAP under :doc:`pair_style quip`, with the XRD bias on top.
+
+```sh
+git clone --recursive https://github.com/libAtoms/QUIP.git
+cd QUIP && meson setup builddir --default-library=static --buildtype=release -Dgap=true
+meson compile -C builddir
+```
+
+Meson builds one archive per subdirectory, where LAMMPS wants a single
+`libquip.a`; combine `libPotentials`, `libGAP`, `liblibAtoms`, `libUtils`,
+`libfox` **and `libf90wrap_stub`** -- the last is easy to miss and shows up as
+an undefined `f90wrap_abort_` at link time. Then
+
+```sh
+cmake ../cmake -D PKG_MADLIB=on -D PKG_ML-QUIP=on \
+               -D QUIP_LIBRARY=/path/to/QUIP/builddir/quiplib/libquip.a
+```
+
+Measured on the 91-atom cell: energy and forces through LAMMPS agree with
+`quippy` on the same frame to `9e-8` eV and `3.7e-8` eV/A, and a biased run
+takes the relative error from 2.88 to 0.44.
+
+### The Fortran backend
+
 The Fortran backend is off by default. It vendors seven files from TurboGAP  -- 
 `kinds`, the five `soap_turbo_*`, and `local_properties`, about 6k lines -- and
 needs LAPACK as well as BLAS, because soap_turbo's radial basis orthonormalises
 through `dgesvd` and `dpotrf`. `lib/madlib/Makefile` builds it standalone for a
 conventional-make LAMMPS or for testing.
+
+## Porting notes
+
+`TURBOGAP-VS-LAMMPS.md` is the side-by-side: where the atoms live in each code,
+what the neighbour list is and what shape it has, how the two decompose work
+across ranks, and which of those differences forced a change here rather than a
+transcription. `NOTES.md` records what the tests caught that reading did not.
 
 ## Provenance
 
@@ -324,3 +360,11 @@ structure factors and the output conventions follow `exp_interface.f90` and
 turbogap` reproduces TurboGAP -- including its single-precision constants, which
 is why the X-ray form factors match it to `4e-16` in that mode and differ at the
 8th digit outside it.
+
+## Test data
+
+The frames and fitted potentials are not in this repository: they belong to the
+`turbogap_tests` data repository, change on a different cadence, and are 24 MB.
+`tests/run.sh` looks for them under `$MADLIB_DATA_ROOT` (default
+`~/test/turbogap_tests`) and links them into `tests/data/gap_files`; legs that
+need them skip when they are absent.

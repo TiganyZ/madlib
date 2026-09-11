@@ -1,0 +1,26 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+# A real GAP potential under pair_style quip, with the MADLIB XRD bias on top.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            1 12.011
+mass            2 15.999
+comm_modify     cutoff 8.0
+neighbor        0.5 bin
+
+pair_style      quip
+pair_coeff      * * data/gap_files/CO.xml "" 6 8
+
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.1
+fix     xrd all mad/xrd c_gr target data/xrd_target.dat q 1.04525 9.97006 201 &
+            output qFq species C O gamma 0.0
+
+compute pot all pe/atom
+compute etot all reduce sum c_pot
+thermo_style custom step pe c_etot f_xrd f_xrd[2]
+thermo_modify format float %.10f
+run 0
+dump d all custom 1 quip_forces.dump id fx fy fz
+dump_modify d sort id format float %.14f
+run 0

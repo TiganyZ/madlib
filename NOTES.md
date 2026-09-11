@@ -320,3 +320,39 @@ and `run.sh` takes a lock and refuses a second concurrent invocation with a
 message. The second matters more than the first. Other legs share scratch names
 too, and a suite that silently produces wrong numbers when run twice is worse
 than one that refuses.
+
+---
+
+# Verification against a real potential
+
+Every test up to here ran on `pair_style zero`, which isolates the bias but says
+nothing about whether it composes with real physics. QUIP supplies that: a
+fitted GAP under `pair_style quip`, with the MADLIB bias on top.
+
+## 19. Assembling libquip.a from a meson build
+
+QUIP's meson build produces one archive per subdirectory; LAMMPS's ML-QUIP
+wants a single `libquip.a`. Combining `libPotentials`, `libGAP`, `liblibAtoms`,
+`libUtils` and `libfox` is the obvious set and links almost everything --
+leaving one undefined symbol, `f90wrap_abort_`, which lives in
+`libf90wrap_stub.a`. That archive exists for the Python wrapper and looks
+irrelevant to a C++ link, which is exactly why it gets left out.
+
+## What it establishes
+
+Energy and forces through `pair_style quip` agree with `quippy` evaluating the
+same potential on the same frame to **9e-8 eV and 3.7e-8 eV/A** -- two
+independent routes into the same GAP.
+
+A biased run on that potential takes the relative error from **2.88 to 0.44**.
+The physical potential energy rises while it does, which is what a restraint
+should do: the structure is pulled to a configuration the potential likes less
+and the data likes more. The temperature rises too, because the bias does work
+on the system and the thermostat has to remove it.
+
+## The test data does not belong here
+
+The fitted potentials are 24 MB and were briefly committed. They belong to the
+`turbogap_tests` repository and change on a different cadence, so `run.sh` now
+looks for them under `$MADLIB_DATA_ROOT` and skips the legs that need them when
+they are absent -- the same arrangement TurboGAP's own suites use.

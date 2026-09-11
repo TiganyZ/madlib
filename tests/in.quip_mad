@@ -1,0 +1,27 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+# Molecular augmented dynamics on a real GAP potential: the XRD bias pulls the
+# structure towards a measured pattern while pair_style quip supplies the physics.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            1 12.011
+mass            2 15.999
+comm_modify     cutoff 8.0
+neighbor        0.5 bin
+
+pair_style      quip
+pair_coeff      * * data/gap_files/CO.xml "" 6 8
+
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.15
+fix     xrd all mad/xrd c_gr target data/xrd_target.dat q 1.04525 9.97006 201 &
+            output qFq species C O gamma 0.0 ${g}
+
+velocity all create 300.0 12345 mom yes
+fix     nve all nve
+fix     t   all langevin 300.0 300.0 0.1 48279
+
+thermo 50
+thermo_style custom step temp pe f_xrd f_xrd[2]
+thermo_modify format float %.8g
+run 200

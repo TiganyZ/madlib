@@ -24,6 +24,13 @@ LMP=${LMP:-../../lammps/build/lmp}
 PYTHON=${PYTHON:-python3}
 RANKS=${RANKS:-4}
 XYZ=/home/tigany/test/turbogap_tests/xrd_mad/atoms.xyz
+
+# Fitted potentials live in the turbogap_tests data repository, not here: they
+# are 24 MB and change on a different cadence from this code. Legs that need
+# them skip when they are absent.
+DATA_ROOT=${MADLIB_DATA_ROOT:-$HOME/test/turbogap_tests}
+GAP_DIR=$DATA_ROOT/xrd_mad/gap_files
+if [ -d "$GAP_DIR" ] && [ ! -e data/gap_files ]; then ln -s "$GAP_DIR" data/gap_files; fi
 fail=0
 
 have() { [ -e "$1" ]; }
@@ -32,7 +39,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap ir}
+want=${*:-forward gradients invariants mpi guards md mc xps gap ir quip}
 
 for w in $want; do
 case $w in
@@ -147,6 +154,53 @@ print(f"    rel_error {rel[0]:.4f} -> {rel[-1]:.4f} over {len(rel)} samples")
 sys.exit(0 if rel[-1] < 0.25 * rel[0] else 1)
 PY
   if [ $? -eq 0 ]; then ok "the bias closes the gap"; else bad "rel_error did not fall"; fi
+  ;;
+
+quip)
+  rm -f /tmp/mad_quip.txt
+  leg "the bias composes with a real ML potential (pair_style quip)"
+  if ! $LMP -h 2>/dev/null | grep -qw quip; then
+    echo "    SKIP: built without ML-QUIP"
+  elif [ ! -e data/gap_files/CO.xml ]; then
+    echo "    SKIP: no GAP potential (set MADLIB_DATA_ROOT)"
+  else
+    $LMP -in in.quip -log none >/dev/null 2>&1
+    $PYTHON - <<'PY'
+import sys
+import numpy as np
+try:
+    from quippy.potential import Potential
+    from ase.io import read
+except ImportError:
+    print("    SKIP: quippy not installed, cannot cross-check"); sys.exit(0)
+at = read("/home/tigany/test/turbogap_tests/xrd_mad/atoms.xyz")
+at.calc = Potential(param_filename="data/gap_files/CO.xml")
+ref_e, ref_f = at.get_potential_energy(), at.get_forces()
+rows = [l.split() for l in open("quip_forces.dump").read().split("ITEM: ATOMS")[-1].split("\n")[1:]
+        if len(l.split()) == 4]
+got = np.array([[float(v) for v in r[1:]] for r in sorted(rows, key=lambda r: int(r[0]))])
+df = np.abs(got - ref_f).max()
+print(f"    forces through LAMMPS vs quippy: max|dF| = {df:.2e} eV/A  (max|F| = {np.abs(ref_f).max():.3f})")
+sys.exit(0 if df < 1e-6 else 1)
+PY
+    if [ $? -eq 0 ]; then ok "pair_style quip agrees with quippy"
+    else bad "pair_style quip disagrees with quippy"; fi
+
+    leg "biased MD on that potential"
+    for g in 0.0 50.0; do
+      $LMP -in in.quip_mad -var g $g -log none 2>&1 | grep -E '^ +200 ' | tail -1 >> /tmp/mad_quip.txt
+    done
+    $PYTHON - <<'PY'
+import sys
+rows = [l.split() for l in open("/tmp/mad_quip.txt")][-2:]
+r0, r1 = float(rows[0][4]), float(rows[1][4])
+print(f"    gamma 0:  rel_error {r0:.4f}")
+print(f"    gamma 50: rel_error {r1:.4f}")
+sys.exit(0 if r1 < 0.5 * r0 else 1)
+PY
+    if [ $? -eq 0 ]; then ok "the bias closes the gap on a real potential"
+    else bad "the bias did not improve the fit"; fi
+  fi
   ;;
 
 ir)

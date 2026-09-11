@@ -12,3 +12,4 @@ lib/madlib/libmadlib.a
 tests/*.dump
 tests/in.ir_guard.log
 tests/.run.lock/
+tests/data/gap_files/
