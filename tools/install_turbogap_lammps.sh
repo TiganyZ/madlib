@@ -29,9 +29,16 @@ JOBS=${JOBS:-8}
 GPU_ARCH=${GPU_ARCH:-}
 KOKKOS_BACKEND=${KOKKOS_BACKEND:-CUDA}
 
-# nvcc refuses a host compiler newer than the CUDA release supports, and the
-# system default is often too new. Leave empty to use the default.
+# nvcc refuses a host compiler newer than the CUDA release supports. Leave empty
+# to use the default, which is usually right once CUDA_HOME points somewhere
+# recent.
 HOST_CXX=${HOST_CXX:-}
+
+# Which CUDA to build against. "auto" takes the newest /usr/local/cuda-* -- the
+# one on PATH is chosen by a system alternatives link and is often not it, and
+# Kokkos refuses to build C++20 with nvcc older than 12.2, so the difference
+# between the two decides whether a GPU build is possible at all.
+CUDA_HOME=${CUDA_HOME:-auto}
 
 # Which stages exist, in dependency order.
 ALL_STAGES="deps python lammps quip symmetrix madlib build test"
@@ -62,8 +69,9 @@ stage_deps() {
     [ -n "$HOST_CXX" ] && step "host compiler for nvcc: $HOST_CXX"
 
     if [ -n "$GPU_ARCH" ]; then
+        select_cuda
         have nvcc || die "GPU_ARCH is set but nvcc is not on PATH"
-        step "cuda: $(nvcc --version | tail -2 | head -1 | sed 's/^ *//')"
+        step "cuda: $(nvcc --version | tail -2 | head -1 | sed 's/^ *//') from ${CUDA_HOME}"
         [ "$GPU_ARCH" = auto ] && GPU_ARCH=$(detect_gpu_arch)
         step "kokkos arch: $GPU_ARCH"
     fi
@@ -91,6 +99,20 @@ bootstrap_build_tools() {
     for t in cmake meson ninja; do
         have $t || die "$t still not available"
     done
+}
+
+select_cuda() {
+    if [ "$CUDA_HOME" = auto ]; then
+        # Sort by version, newest last. A bare /usr/local/cuda is a symlink to
+        # whichever the system picked and is deliberately not trusted.
+        CUDA_HOME=$(ls -d /usr/local/cuda-* 2>/dev/null | sort -V | tail -1)
+        [ -z "$CUDA_HOME" ] && CUDA_HOME=/usr/local/cuda
+    fi
+    if [ -x "$CUDA_HOME/bin/nvcc" ]; then
+        export PATH="$CUDA_HOME/bin:$PATH"
+        export CUDA_HOME
+        hash -r
+    fi
 }
 
 detect_gpu_arch() {
@@ -241,7 +263,6 @@ cmake_flags() {
         echo "-D PKG_KOKKOS=on -D Kokkos_ENABLE_$KOKKOS_BACKEND=on -D Kokkos_ARCH_$GPU_ARCH=on"
         echo "-D Kokkos_ENABLE_OPENMP=on -D SYMMETRIX_KOKKOS=on"
         echo "-D CMAKE_CXX_COMPILER=$PREFIX/lammps/lib/kokkos/bin/nvcc_wrapper"
-        [ -n "$HOST_CXX" ] && echo "-D CMAKE_CXX_FLAGS=-ccbin=$HOST_CXX"
     else
         echo "-D SYMMETRIX_KOKKOS=off"
     fi
@@ -250,6 +271,14 @@ cmake_flags() {
 stage_build() {
     say "building lammps"
     bootstrap_build_tools
+    [ -n "$GPU_ARCH" ] && select_cuda
+    # nvcc_wrapper takes its host compiler from the environment. Passing
+    # -ccbin as a CXX flag does not work: the wrapper forwards CMAKE_CXX_FLAGS
+    # to the host compiler, which then sees -ccbin and rejects it.
+    if [ -n "$GPU_ARCH" ] && [ -n "$HOST_CXX" ]; then
+        export NVCC_WRAPPER_DEFAULT_COMPILER=$HOST_CXX
+        step "nvcc host compiler: $HOST_CXX"
+    fi
     local build=$PREFIX/lammps/build
     ensure_dir "$build"
     # shellcheck disable=SC2046
