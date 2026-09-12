@@ -98,7 +98,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -421,6 +421,40 @@ kk)
 soapbasis)
   leg "the exported SOAP basis orthonormalises and is counted right"
   fortran_check soapbasisverify "W, S, skip and multiplicity are what they claim"
+  ;;
+
+soapgpu)
+  leg "the device SOAP descriptor reproduces the host's"
+  LIB=../lib/madlib
+  GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
+  if [ ! -f "$LIB/libmadlib.a" ]; then
+    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  elif [ ! -d "$GPUOBJ" ]; then
+    echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
+  else
+    # Two binaries, because the CPU and GPU soap_turbo share a module name and
+    # an entry point and cannot be linked together. Same source, same
+    # configuration; the only difference is which soap_turbo answered.
+    rm -f /tmp/mad_desc_cpu.dat /tmp/mad_desc_gpu.dat
+    gfortran -O2 -cpp -ffree-line-length-none -I "$LIB" soapdescdump.f90 \
+        -o /tmp/mad_desc_cpu "$LIB/libmadlib.a" -llapack -lblas 2>/tmp/mad_desc.log \
+      && ${FC:-mpif90} -O2 -cpp -ffree-line-length-none -fallow-argument-mismatch \
+        -DMADLIB_GPU_DESC -I "$GPUOBJ" soapdescdump.f90 -o /tmp/mad_desc_gpu \
+        "$GPUOBJ"/*.o "$GPUOBJ"/cu/*.o \
+        -L"${CUDA_LIB:-/usr/local/cuda-13.4/lib64}" -lcudart -lcublas -lcuda -lstdc++ \
+        -llapack -lblas 2>>/tmp/mad_desc.log
+    if [ $? -ne 0 ]; then
+      sed 's/^/     /' /tmp/mad_desc.log | tail -6
+      bad "the descriptor binaries did not build"
+    elif ! /tmp/mad_desc_cpu /tmp/mad_desc_cpu.dat >/dev/null 2>&1 \
+         || ! /tmp/mad_desc_gpu /tmp/mad_desc_gpu.dat >/dev/null 2>&1; then
+      bad "a descriptor binary did not run"
+    else
+      $PYTHON compare_soap_desc.py /tmp/mad_desc_cpu.dat /tmp/mad_desc_gpu.dat
+      if [ $? -eq 0 ]; then ok "device and host agree on the descriptor"
+      else bad "the device descriptor differs from the host's"; fi
+    fi
+  fi
   ;;
 
 soapdesc)
