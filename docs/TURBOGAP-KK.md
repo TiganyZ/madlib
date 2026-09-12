@@ -422,6 +422,27 @@ separate build, which is how LAMMPS treats KOKKOS anyway.
 `tools/check_one_soap_turbo.sh` is the guard, meant to sit in front of any link
 that mixes `libmadlib.a` with the device objects.
 
+### Which turns out to be the integration, not an obstacle
+
+If a build has exactly one SOAP backend anyway, the two can export the **same C
+symbol with the same arguments** and let the build choose. `madlib_local_property`
+now does: a host implementation in `madlib_soap.f90` and a device one in
+`madlib_soap_gpu.f90`, identical from the caller's side.
+
+So `pair_turbogap.cpp` needs no change at all to compute SOAP on the device --
+it already calls `madlib_local_property`. `tests/soaplocalpropdump.f90` is the
+proof and contains no `#ifdef`: one source, compiled twice against the two
+backends, agreeing to 5.9e-12 on values and 1.2e-11 on derivatives.
+
+One deliberate asymmetry. The prediction stays on the **host** in both, through
+`local_property_predict`, even though `gpu_local_property_predict` exists. The
+device routine takes no `zero_trunc` and does not clamp; the host one floors
+negative values and zeroes their gradients. Core electron binding energies and
+Hirshfeld volumes both set `zero_trunc`, so using the device predictor would
+quietly change the answer for exactly the quantities this is for. The expensive
+part is the descriptor and that is on the device; the contraction after it is
+not worth a silent change in physics.
+
 ## 8. Stage 4, and why it is not a kernel port
 
 The obvious reading of stage 4 is "lift `gap_soap_*.cu` the way `gap_2b.cu` was
