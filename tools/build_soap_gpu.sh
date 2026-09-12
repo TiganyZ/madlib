@@ -18,6 +18,14 @@ set -u
 
 CUDA_BIN=${CUDA_BIN:-/usr/local/cuda-13.4/bin}
 ARCH=${ARCH:-sm_86}
+
+# Exactly what makefiles/Makefile.Aalto_*_hip_cuda passes. Every one matters:
+# without --expt-extended-lambda every tg_parallel_for is a compile error, and
+# without -DCUDA gap_3b.cc takes the HIP branch of its warp reduction and fails
+# on __shfl_down. Leaving them out makes the sources look broken when they are
+# not.
+NVCC_DEFS="-DHOP_TARGET_CUDA -DCUDA"
+NVCC_EXTRA="--expt-extended-lambda --expt-relaxed-constexpr"
 FC=${FC:-mpif90}
 FFLAGS="-O2 -fPIC -cpp -ffree-line-length-none -fallow-argument-mismatch -D_GPU -D_MPIF90"
 
@@ -25,13 +33,15 @@ FFLAGS="-O2 -fPIC -cpp -ffree-line-length-none -fallow-argument-mismatch -D_GPU 
 FORTRAN="kinds fortran_cuda_interfaces soap_turbo_functions soap_turbo_radial
          soap_turbo_angular soap_turbo_compress soap_turbo"
 
-# gap_3b.cc and orthonormalization_kernels.cc are deliberately absent. Neither
-# is on the descriptor path -- the GPU build computes the orthonormalisation in
-# Fortran on the host, and 3b is a different term -- and neither compiles under
-# CUDA 13.4 as it stands: gap_3b uses __shfl_down, removed in favour of
-# __shfl_down_sync, and orthonormalization_kernels calls hipsolver with its
-# #include commented out. Both are worth fixing upstream; neither blocks this.
-SKIP_CU='gap_3b|orthonormalization_kernels'
+# orthonormalization_kernels.cc is not built, and neither does TurboGAP build
+# it: its own Makefile has it commented out of SRC_CC, "deliberately disabled,
+# not dead: kept for possible reintegration". It calls hipsolver with its own
+# #include commented out, and hop ships no solver header.
+#
+# gap_3b.cc IS built, as a .cc with -std=c++20 for <numbers> and <bit>, which
+# is why TurboGAP compiles it with $(CC) rather than $(CU). It is not on the
+# descriptor path but costs little and keeps this honest about what compiles.
+SKIP_CC='orthonormalization_kernels'
 
 usage() { echo "usage: $0 <turbogap-src-dir> [outdir]" >&2; exit 2; }
 
@@ -56,19 +66,30 @@ gather_sources() {
     cp "$MADLIB/lib/madlib/madlib_soap_gpu.f90" "$out/"
 }
 
+# $1 source file, $2 outdir, $3 C++ standard. .cc needs c++20 for <numbers>.
+compile_device_file() {
+    local f=$1 out=$2 std=$3 src=$4
+    local b; b=$(basename "$f"); b=${b%.*}
+    nvcc -x cu -O2 -std="$std" -arch="$ARCH" $NVCC_EXTRA $NVCC_DEFS \
+         -Xcompiler -fPIC -I"$src/gpu" -I"$src/hop" -I"$src/hop/source/hip" \
+         -c "$f" -o "$out/cu/$b.o" > "$out/cu/$b.log" 2>&1 || {
+        echo "ERROR: $(basename "$f") did not compile; see $out/cu/$b.log" >&2
+        grep -m3 -iE 'error' "$out/cu/$b.log" >&2
+        return 1
+    }
+}
+
 build_device() {
     local src=$1 out=$2 n=0
     mkdir -p "$out/cu"
     for f in "$src"/gpu/*.cu; do
-        local b; b=$(basename "$f" .cu)
-        echo "$b" | grep -qE "$SKIP_CU" && continue
-        nvcc -O2 -std=c++17 -arch="$ARCH" --expt-extended-lambda --expt-relaxed-constexpr \
-             -Xcompiler -fPIC -I"$src/gpu" -I"$src/hop" -I"$src/hop/source/hip" \
-             -c "$f" -o "$out/cu/$b.o" > "$out/cu/$b.log" 2>&1 || {
-            echo "ERROR: $b.cu did not compile; see $out/cu/$b.log" >&2
-            grep -m3 -iE 'error' "$out/cu/$b.log" >&2
-            exit 1
-        }
+        compile_device_file "$f" "$out" c++17 "$src" || exit 1
+        n=$((n + 1))
+    done
+    for f in "$src"/gpu/*.cc; do
+        local b; b=$(basename "$f" .cc)
+        echo "$b" | grep -qE "$SKIP_CC" && continue
+        compile_device_file "$f" "$out" c++20 "$src" || exit 1
         n=$((n + 1))
     done
     echo "  $n device objects"

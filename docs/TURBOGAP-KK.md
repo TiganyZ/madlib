@@ -364,6 +364,38 @@ not defined. So stage 4 is: **turn `_GPU` on for the vendored Fortran and give
 it a handle and a stream**, rather than re-deriving 2700 lines of kernels in
 C++. The device pointers it wants are what `view.data()` already returns.
 
+### CUDA newer than 12
+
+The device sources are already fine on it. All fourteen `.cu` plus `gap_3b.cc`
+compile under **CUDA 13.4** with the flags `makefiles/` already passes, with no
+deprecation warnings and no CUDA-version conditional anywhere in them.
+
+An earlier note here said `gap_3b.cc` "uses `__shfl_down`, removed in CUDA 13".
+That was wrong, and it was wrong because of a missing flag rather than a real
+defect: the file already guards the warp reduction with `#ifdef CUDA` and takes
+`__shfl_down_sync` on that branch. `tools/build_soap_gpu.sh` was not passing
+`-DCUDA`, so it compiled the HIP branch and failed. It now passes what
+TurboGAP's own arch makefile does -- `-DHOP_TARGET_CUDA -DCUDA` and
+`--expt-extended-lambda --expt-relaxed-constexpr`, without which every
+`tg_parallel_for` is a compile error too.
+
+Where a version genuinely matters is `KOKKOS=1`: Kokkos 5 wants C++20 from a
+compiler that supports it, which is **nvcc 12.2 or later**, and below that the
+build dies inside Kokkos headers with template errors naming nothing
+recognisable. TurboGAP's Makefile now refuses that early and says where to look
+for a newer toolkit -- a machine often carries one that is not on `PATH`, which
+is exactly the case on `alt` (12.0 on `PATH`, 13.4 in `/usr/local`).
+
+`orthonormalization_kernels.cc` remains the one file that does not compile, and
+that is not a CUDA-13 problem either: it is **deliberately disabled** in
+TurboGAP's own Makefile, kept for reintegration. hop covers runtime, BLAS, FFT,
+RAND and RTC but ships no solver header, so `src/gpu/gpu_solver.h` now maps the
+hipSOLVER spellings onto cuSOLVER. That is necessary and not sufficient: the
+file declares its helpers as taking a `hipblasHandle_t` and passes it straight
+to `hipsolver*`, which compiles on ROCm only because hipSOLVER's handle is a
+`void*`. Re-enabling it on CUDA needs a real `cusolverDnHandle_t` threaded
+through five helpers. Nothing in the descriptor path touches it.
+
 ### The gate, measured -- and two warnings in this document were wrong
 
 `tools/check_gpu_gate.sh` compiles TurboGAP's device layer with LAMMPS's own
