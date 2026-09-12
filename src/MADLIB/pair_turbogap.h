@@ -131,6 +131,8 @@ class PairTurboGAP : public Pair {
   // whereas "2b and soap agree and 3b does not" names the bug -- which is
   // exactly how the 3b sparse-set layout was found.
   int report_terms = 0;
+  int profile = 0;    // TURBOGAP_PROFILE: per-phase wall time
+
 
   void allocate();
   // Virtual because the Kokkos variant replaces exactly this and nothing

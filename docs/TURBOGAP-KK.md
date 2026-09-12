@@ -273,19 +273,74 @@ Ten steps of NVE on `alt` (one RTX A2000, one rank), glassy carbon replicated:
 | 728 | 5.11 s | 5.15 s | 0.99x |
 | 1638 | 10.37 s | 9.99 s | 1.04x |
 
-So stages 1 and 2 do not pay for themselves, and were never going to. What is
-on the device is the neighbour build, 2b and core_pot; `soap_turbo` dominates
-the cost and still runs on the host, with a copy back to it every step. The
-crossover sits near 1600 atoms and the asymptote is whatever fraction of the
-work 2b and core_pot are, which is small.
+`TURBOGAP_PROFILE=1` says why, at 728 atoms:
+
+| phase | ms/step | share |
+| --- | --- | --- |
+| neighbour build | 2.2 | 0.4% |
+| `soap_turbo` | 450 | 87.5% |
+| 2b + 3b + core_pot | 66 | 12.9% |
+
+Stages 1 and 2 moved the neighbour build and two of the four terms -- together
+about 13% of the work. **Amdahl caps them at 1.15x even if the device ran them
+in zero time**, so 1.04x is most of what was available and no amount of tuning
+inside them will find more.
+
+Worse, the `kk` pair phase is *slower* than the host's, 66 ms against 61. 2b
+and core_pot are cheap enough that the launches and the copy back cost more
+than the arithmetic saved. Stage 2 is a correctness step and a plumbing step;
+it is not a speed step, and at this size it is a small loss.
 
 This is worth stating plainly rather than quoting the 1.04x: **the reason to
 have done stages 1 and 2 is that they are checkable**, and they leave the
-device arrays and the dispatch shim that stage 4 needs. Stage 4 -- SOAP on the
-device -- is where the speedup is, and it is now a change to one term rather
-than to the whole style.
+device arrays and the dispatch shim that stage 4 needs. SOAP is 87.5% of the
+cost and the only thing worth moving.
 
-## 7. Toolchain notes for `alt`
+## 7. Stage 4, and why it is not a kernel port
+
+The obvious reading of stage 4 is "lift `gap_soap_*.cu` the way `gap_2b.cu` was
+lifted". That is the expensive way, and measuring the surface says so:
+
+| | `gap_2b.cu` | the SOAP files |
+| --- | --- | --- |
+| lines | 201 | ~2700 |
+| vendor API calls | **0** | 40+ |
+| types needed | none | `hipDoubleComplex`, `double3` |
+| allocation | none | `hipMallocAsync` / `hipFreeAsync` |
+| BLAS | none | three GEMMs |
+
+`gap_2b.cu` lifted verbatim because it called nothing. The SOAP kernels
+allocate, use a complex type, and the prediction step is three GEMMs -- the
+sparse-GP kernel evaluation itself, which is what `gpu_blas.cu` exists for.
+
+But TurboGAP already orchestrates all of this **in Fortran**:
+`soap_turbo_gpu/src/soap_turbo.f90` (1510 lines) calls the device entry points
+in order, and `gap.f90` has a `_GPU` variant of `get_soap_energy_and_forces`
+that takes `soap_d`, `soap_der_d` and `n_neigh_d` -- device pointers -- plus a
+`cublas_handle` and a `gpu_stream` as `type(c_ptr)`.
+
+MADLIB already vendors `gap.f90` and builds it with `-cpp`, with `_GPU` simply
+not defined. So stage 4 is: **turn `_GPU` on for the vendored Fortran and give
+it a handle and a stream**, rather than re-deriving 2700 lines of kernels in
+C++. The device pointers it wants are what `view.data()` already returns.
+
+Three things to settle when it is done:
+
+- **The BLAS handle.** `cublas_handle` is created by `create_cublas_handle` in
+  `gpu_blas.cu`. cuBLAS ships with the CUDA toolkit LAMMPS already links under
+  `PKG_KOKKOS` + CUDA, so this is not a second runtime -- it is the same one.
+  On ROCm it resolves to hipBLAS through hop. This is the one place where the
+  bare-kernel portability question of section 4 has to be answered rather than
+  side-stepped.
+- **The allocator.** The SOAP kernels `hipMallocAsync` their scratch. Either
+  let them (a second allocator beside Kokkos, which is what section 2 warned
+  about) or shim those three calls onto Kokkos allocation. The shim is small
+  and keeps the files verbatim.
+- **`gap_soap_forces.cu` must not be converted to `tg_parallel_for`.** Its
+  reductions are `__shared__` trees over doubles, and a Kokkos reduction
+  reassociates them. It is fine to *call*; it is not fine to rewrite.
+
+## 8. Toolchain notes for `alt`
 
 ```sh
 export PATH=/usr/local/cuda-13.4/bin:$PATH      # NOT the 12.0 on the default PATH

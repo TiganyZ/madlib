@@ -28,6 +28,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 
@@ -85,6 +86,7 @@ PairTurboGAP::PairTurboGAP(LAMMPS *lmp) : Pair(lmp)
   centroidstressflag = CENTROID_NOTAVAIL;
   comm_reverse = 3;    // a force vector per ghost; see pack_reverse_comm
   report_terms = (getenv("TURBOGAP_TERMS") != nullptr) ? 1 : 0;
+  profile = (getenv("TURBOGAP_PROFILE") != nullptr) ? 1 : 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -575,9 +577,26 @@ void PairTurboGAP::compute(int eflag, int vflag)
     if (nghost) memset(&atom->f[nlocal][0], 0, 3 * nghost * sizeof(double));
   }
 
-  build_neighbours();
-  add_soap_terms(eflag);
-  add_pair_terms(eflag);
+  if (!profile) {
+    build_neighbours();
+    add_soap_terms(eflag);
+    add_pair_terms(eflag);
+  } else {
+    using clock = std::chrono::steady_clock;
+    auto ms = [](clock::time_point a, clock::time_point b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    const auto t0 = clock::now();
+    build_neighbours();
+    const auto t1 = clock::now();
+    add_soap_terms(eflag);
+    const auto t2 = clock::now();
+    add_pair_terms(eflag);
+    const auto t3 = clock::now();
+    if (comm->me == 0)
+      fprintf(stderr, "  turbogap profile: neigh %.2f ms, soap %.2f ms, 2b+3b+core %.2f ms\n",
+              ms(t0, t1), ms(t1, t2), ms(t2, t3));
+  }
 
   // The virial comes from f.r rather than from TurboGAP's own accumulator.
   // Its routines return a 3x3 built with a sign and a factor of their own, and
