@@ -222,6 +222,15 @@ stage_symmetrix() {
                 libsymmetrix/external/cblas-prototypes"
     [ -n "$GPU_ARCH" ] && subs="$subs libsymmetrix/external/kokkos libsymmetrix/external/kokkos-kernels"
     ( cd "$sym" && git submodule update --init --force --depth 1 $subs ) || die "symmetrix submodules failed"
+    # symmetrix registers its Kokkos styles through #define aliases it then
+    # undefs, and LAMMPS's style_pair.cpp generator emits the alias name into a
+    # file compiled without PAIR_CLASS. Inline the templates the way LAMMPS's
+    # own Kokkos styles do.
+    if [ -n "$GPU_ARCH" ] && [ -f "$PREFIX/patch_symmetrix_kokkos.py" ]; then
+        step "adapting the kokkos style registration"
+        python3 "$PREFIX/patch_symmetrix_kokkos.py" \
+            "$sym/pair_symmetrix/pair_symmetrix_mace_kokkos.h"
+    fi
     step "patching lammps"
     ( cd "$sym/pair_symmetrix" && ./install.sh "$PREFIX/lammps" ) || die "symmetrix install.sh failed"
 }
