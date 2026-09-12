@@ -141,13 +141,73 @@ TurboGAP's `extern "C"` entry points already take raw device pointers. So there
 is no upload and no download -- the existing compute can run on LAMMPS's own
 device data.
 
-| stage | what | check |
+| stage | what | state |
 | --- | --- | --- |
 | 0 | `pair_style turbogap` on the CPU | **done**: forces to 1.1e-09 against TurboGAP |
-| 1 | build the TurboGAP-layout neighbour list on device with `tg_parallel_for`, from LAMMPS's Views | the device list equals the host list built by the CPU style, element for element |
-| 2 | vendor the device layer into `lib/madlib` and call the existing device entry points with `view.data()` | `turbogap/kk` energy and forces against `turbogap` on the same configuration |
+| 1 | the neighbour list built on device, host compute unchanged | **done**: energy identical to the host style, forces to 1.7e-09 |
+| 2 | vendor the device layer and call its entry points with `view.data()` | gate cleared, not started; scope below |
 | 3 | Option 3: no `hip*` under `_KOKKOS` | grep is empty; the regression control stays at zero attributable |
 | 4 | optionally Option 4 | -- |
+
+### What stage 1 settled
+
+The acceptance check is end to end -- `turbogap/kk` against `turbogap` on the
+same configuration -- because with the compute held fixed, any difference IS
+the neighbour list. Energy matches exactly; forces differ by 1.7e-09 relative
+and cannot be made to match bitwise, because the two runs build their lists
+differently (LAMMPS's CPU binning against Kokkos's) so a site's neighbours come
+in a different order and the per-pair force adjoint reassociates. The energy is
+a sum over sites whose own order is unchanged, which is why it agrees exactly
+and the forces do not.
+
+Four things it ran into, all of which stage 2 inherits:
+
+- **KOKKOS refuses `newton on` with a full neighbour list**, and a SOAP
+  descriptor must have a full list. So folding ghost forces back onto their
+  owners -- which LAMMPS does under newton on -- is the style's own job now,
+  through `pack_reverse_comm`. Without it every force a site puts on a
+  neighbour it does not own is dropped silently.
+- **`execution_space` must name where the forces are actually written.** With
+  the compute on the host and the space declared as device, LAMMPS marks
+  `atom:f` modified on the device while the style writes it on the host, and
+  Kokkos rejects the pair: "Concurrent modification of host and device views".
+  Stage 2 moves both together, and that is one commit rather than two.
+- LAMMPS develop **renamed the view typedefs**:
+  `t_kkfloat_1d_3_lr_randomread`, not `t_x_array_randomread`.
+- `PairStyle()` takes the template directly. The `#define`d alias form
+  symmetrix uses exists because it templates on two parameters and the comma
+  would split the macro arguments; with one parameter the alias is actively
+  wrong, because the `#undef` closing it leaves the name undefined in the
+  generated `style_pair.cpp`.
+
+One number that looks alarming and is not: the device list holds 4929 pairs
+where LAMMPS reports 14876 neighbours. LAMMPS builds at `rcut + skin` (6.5 A
+here) and both styles then filter to the potential's 4.5 A; the counts sit on
+opposite sides of that filter.
+
+### Stage 2: measured scope, and the gate
+
+To vendor:
+
+| | lines |
+| --- | --- |
+| `src/gpu/*.cu`, `*.cc` | 6281 |
+| `soap_turbo_gpu` (5 files) | 4106 |
+| `fortran_cuda_interfaces.f90` | 1375 |
+| `gpu_context_gpu.f90` | 329 |
+| `src/hop` headers | 68 files |
+
+**The first gate is clear**: all 14 `.cu` files compile under CUDA 13.4 at
+C++20 -- the standard LAMMPS forces with `PKG_KOKKOS` on, and a newer toolchain
+than TurboGAP's own 12.0/C++17 build. That was worth testing before anything
+else, because a failure there would have ruled the whole approach out rather
+than merely delayed it.
+
+What remains genuinely open is the coexistence described in section 2: hop's
+vendor runtime and hipBLAS alongside LAMMPS's Kokkos, two device allocators,
+and Kokkos's lifetime. `tg_owns_kokkos` and the `#error` on a hop/Kokkos
+vendor mismatch, both in TurboGAP's `gpu_backend.h`, exist for this and are the
+first two things stage 2 leans on.
 
 Stage 1 is the right first step: it is small, it is the first genuinely
 Kokkos-native kernel in this code, and it is checkable on its own against
