@@ -6,7 +6,13 @@
 # BLAS is the only external dependency.
 
 FC      = gfortran
-FFLAGS  = -O2 -fPIC
+# -cpp is load-bearing, not decoration. turbogap/local_properties.f90 is a
+# VERBATIM copy of TurboGAP's, and carries #ifdef _GPU blocks around its device
+# path. Without the preprocessor gfortran does not remove them and the compile
+# fails; with it, and _GPU never defined, they vanish. Vendoring the file
+# unedited is what makes it diffable against upstream, which is the whole point
+# of tools/vendor_turbogap.sh.
+FFLAGS  = -O2 -fPIC -cpp
 BLAS    = -llapack -lblas
 
 SRC = turbogap/kinds.f90 \

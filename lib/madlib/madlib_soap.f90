@@ -81,11 +81,19 @@ contains
                                     basis, scaling_mode, &
                                     compress, n_nonzero, p_i, p_j, p_el, dim, &
                                     n_sparse, qs, alphas, v0, delta, zeta, &
-                                    do_derivatives, v, v_der) &
+                                    zero_trunc, do_derivatives, v, v_der) &
       bind(c, name="madlib_local_property")
 
       integer(c_int), value :: n_sites, n_pairs, n_species, l_max, radial_enhancement
       integer(c_int), value :: compress, n_nonzero, dim, n_sparse, do_derivatives
+!  Floor V at zero, and zero the derivative where it fires.
+!
+!  Passed explicitly and never defaulted, because local_property_predict
+!  defaults it to TRUE. That is right for a binding energy or a Hirshfeld
+!  volume, which cannot be negative; it is catastrophic for anything that can
+!  be, such as a potential energy, and it fails silently -- the clamped sites
+!  simply stop contributing a force. A caller must say which it has.
+      integer(c_int), value :: zero_trunc
       integer(c_int), intent(in) :: n_neigh(*), species_idx(*), alpha_max(*), p_i(*), p_j(*)
       real(c_double), intent(in) :: rjs(*), thetas(*), phis(*), p_el(*)
       real(c_double), intent(in) :: rcut_hard(*), rcut_soft(*), nf(*), global_scaling(*)
@@ -151,7 +159,8 @@ contains
       call local_property_predict(soap, reshape(qs(1:dim*n_sparse), [dim, n_sparse]), &
                                   alphas(1:n_sparse), v0, delta, zeta, v(1:n_sites), &
                                   do_der, soap_cart_der, n_neigh(1:n_sites), &
-                                  v_der_view(v_der, do_der, n_pairs))
+                                  v_der_view(v_der, do_der, n_pairs), &
+                                  zero_trunc=(zero_trunc /= 0))
 
       deallocate (soap, soap_cart_der, mask, species, species_multiplicity)
    end subroutine madlib_local_property

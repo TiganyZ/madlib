@@ -45,7 +45,7 @@ madlib_local_property(int n_sites, int n_pairs, int n_species, const int *n_neig
                       const char *basis, const char *scaling_mode, int compress, int n_nonzero,
                       const int *p_i, const int *p_j, const double *p_el, int dim, int n_sparse,
                       const double *qs, const double *alphas, double v0, double delta, double zeta,
-                      int do_derivatives, double *v, double *v_der);
+                      int zero_trunc, int do_derivatives, double *v, double *v_der);
 #endif
 
 /* ---------------------------------------------------------------------- */
@@ -249,6 +249,11 @@ void ComputeMADPropertyTurbogap::compute_property()
     const int ns = (int) B.n_neigh.size(), np = (int) B.rjs.size();
     if (ns == 0) continue;
 
+    // zero_trunc = 1: a local property here is a binding energy, a Hirshfeld
+    // volume or a charge magnitude, none of which can be negative, and
+    // TurboGAP floors them. pair_style turbogap passes 0 instead -- a
+    // potential energy is routinely negative and flooring it would silently
+    // drop the force on every clamped site.
     madlib_local_property(
         ns, np, b.n_species, B.n_neigh.data(), B.species_idx.data(), B.rjs.data(), B.thetas.data(),
         B.phis.data(), b.alpha_max.data(), b.l_max, b.rcut_hard.data(), b.rcut_soft.data(),
@@ -256,8 +261,8 @@ void ComputeMADPropertyTurbogap::compute_property()
         b.atom_sigma_t.data(), b.atom_sigma_t_scaling.data(), b.amplitude_scaling.data(),
         b.radial_enhancement, b.central_weight.data(), b.basis.c_str(), b.scaling_mode.c_str(),
         b.compress ? 1 : 0, b.n_nonzero, b.p_i.data(), b.p_j.data(), b.p_el.data(), b.dim,
-        b.n_sparse, b.qs.data(), b.alphas.data(), b.v0, b.delta, b.zeta, 1, B.q.data(),
-        B.qder.data());
+        b.n_sparse, b.qs.data(), b.alphas.data(), b.v0, b.delta, b.zeta,
+        /* zero_trunc */ 1, /* do_derivatives */ 1, B.q.data(), B.qder.data());
 
     for (int s = 0; s < ns; s++) vector_atom[B.site_atom[s]] = B.q[s];
   }

@@ -177,7 +177,7 @@ module soap_turbo_angular
 ! coordinates except for that at r = 0.
 !
 ! The subroutine takes as input the Plm, which have been computed up to
-! lmax+1, since that is needed in one of the recursions
+! lmax+1, since that is needed in one of the recursions 
   subroutine get_plm_array_der(plm_array, lmax, x, plm_array_div_sin, plm_array_der_mul_sin)
 
     implicit none
