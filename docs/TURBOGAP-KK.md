@@ -145,20 +145,21 @@ device data.
 | --- | --- | --- |
 | 0 | `pair_style turbogap` on the CPU | **done**: forces to 1.1e-09 against TurboGAP |
 | 1 | the neighbour list built on device, host compute unchanged | **done**: energy identical to the host style, forces to 1.7e-09 |
-| 2 | vendor the device layer and call its entry points with `view.data()` | gate cleared, not started; scope below |
-| 3 | Option 3: no `hip*` under `_KOKKOS` | grep is empty; the regression control stays at zero attributable |
-| 4 | optionally Option 4 | -- |
+| 2 | 2b and core_pot through TurboGAP's own device kernels | **done**: both terms match the host, 2.9e-12 and 1.3e-12 |
+| 3 | Option 3: no `hip*` under `_KOKKOS` | applied at one point of use, via the shim headers |
+| 4 | soap_turbo and 3b on the device | not started, and the one that pays |
 
 ### What stage 1 settled
 
 The acceptance check is end to end -- `turbogap/kk` against `turbogap` on the
 same configuration -- because with the compute held fixed, any difference IS
-the neighbour list. Energy matches exactly; forces differ by 1.7e-09 relative
-and cannot be made to match bitwise, because the two runs build their lists
-differently (LAMMPS's CPU binning against Kokkos's) so a site's neighbours come
-in a different order and the per-pair force adjoint reassociates. The energy is
-a sum over sites whose own order is unchanged, which is why it agrees exactly
-and the forces do not.
+the neighbour list. Energy matches to every digit the thermo table
+prints; forces differ by 1.7e-09 relative and cannot be made to match bitwise,
+because the two runs build their lists differently (LAMMPS's CPU binning
+against Kokkos's) so a site's neighbours come in a different order and the
+per-pair force adjoint reassociates. "Exactly" was claimed here on the strength
+of the thermo output, which prints eight digits; at `%.17g` the terms differ at
+2e-11 like everything else.
 
 Four things it ran into, all of which stage 2 inherits:
 
@@ -172,6 +173,15 @@ Four things it ran into, all of which stage 2 inherits:
   `atom:f` modified on the device while the style writes it on the host, and
   Kokkos rejects the pair: "Concurrent modification of host and device views".
   Stage 2 moves both together, and that is one commit rather than two.
+- **`newton off` also means LAMMPS never clears the ghost forces.**
+  `Verlet::force_clear()` extends its `memset` over the ghosts only when newton
+  is on. A style that writes ghost forces and folds them back itself therefore
+  reads last step's leftovers -- exact at `run 0`, when the array is fresh from
+  allocation, and wrong by up to 16 eV/A on every atom from step 1. This sat
+  undetected through all of stage 1 and 2 because no leg in the suite took a
+  step; it turned up in a benchmark. `tests/in.md_*` and the `pairmd` leg exist
+  for it now, and the lesson generalises: a pair style that is only ever
+  checked at `run 0` is not checked.
 - LAMMPS develop **renamed the view typedefs**:
   `t_kkfloat_1d_3_lr_randomread`, not `t_x_array_randomread`.
 - `PairStyle()` takes the template directly. The `#define`d alias form
@@ -252,7 +262,30 @@ to change before that was visible: the terms are reported separately rather
 than as one sum, and at `%.17g` rather than `%.8f`, which was coarser than the
 tolerance it was being compared against.
 
-## 6. Toolchain notes for `alt`
+## 6. What it costs today
+
+Ten steps of NVE on `alt` (one RTX A2000, one rank), glassy carbon replicated:
+
+| atoms | `turbogap` | `turbogap/kk` | |
+| --- | --- | --- | --- |
+| 91 | 0.82 s | 1.16 s | 0.70x |
+| 364 | 2.67 s | 2.82 s | 0.95x |
+| 728 | 5.11 s | 5.15 s | 0.99x |
+| 1638 | 10.37 s | 9.99 s | 1.04x |
+
+So stages 1 and 2 do not pay for themselves, and were never going to. What is
+on the device is the neighbour build, 2b and core_pot; `soap_turbo` dominates
+the cost and still runs on the host, with a copy back to it every step. The
+crossover sits near 1600 atoms and the asymptote is whatever fraction of the
+work 2b and core_pot are, which is small.
+
+This is worth stating plainly rather than quoting the 1.04x: **the reason to
+have done stages 1 and 2 is that they are checkable**, and they leave the
+device arrays and the dispatch shim that stage 4 needs. Stage 4 -- SOAP on the
+device -- is where the speedup is, and it is now a change to one term rather
+than to the whole style.
+
+## 7. Toolchain notes for `alt`
 
 ```sh
 export PATH=/usr/local/cuda-13.4/bin:$PATH      # NOT the 12.0 on the default PATH
