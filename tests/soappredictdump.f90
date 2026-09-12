@@ -25,16 +25,15 @@ program soappredictdump
    implicit none
 
    integer, parameter :: dp = kind(0.d0)
-   integer, parameter :: n_sites = 8
-   integer, parameter :: n_per = 10
-   integer, parameter :: n_pairs = n_sites*n_per
+   integer :: n_sites, n_per, n_pairs, n_reps
    integer, parameter :: n_species = 2
    integer, parameter :: l_max = 3
    integer, parameter :: n_sparse = 6
 
-   integer(c_int) :: n_neigh(n_sites), species_idx(n_pairs), alpha_max(n_species)
-   integer(c_int) :: neighbors_list(n_pairs), p_i(1), p_j(1), dim
-   real(c_double) :: rjs(n_pairs), thetas(n_pairs), phis(n_pairs), xyz(3*n_pairs), p_el(1)
+   integer(c_int), allocatable :: n_neigh(:), species_idx(:), neighbors_list(:)
+   integer(c_int) :: alpha_max(n_species), p_i(1), p_j(1), dim
+   real(c_double), allocatable :: rjs(:), thetas(:), phis(:), xyz(:)
+   real(c_double) :: p_el(1)
    real(c_double) :: rcut_hard(n_species), rcut_soft(n_species), nf(n_species)
    real(c_double) :: global_scaling(n_species), atom_sigma_r(n_species)
    real(c_double) :: atom_sigma_r_scaling(n_species), atom_sigma_t(n_species)
@@ -45,10 +44,26 @@ program soappredictdump
    real(c_double), allocatable :: energies(:), forces(:), virial(:)
    integer(8) :: seed
    integer :: i, j, k, p, a
-   character(len=256) :: outfile
+   character(len=256) :: outfile, env
+   integer(8) :: c0, c1, crate
 
    call get_command_argument(1, outfile)
    if (len_trim(outfile) == 0) outfile = "soappredict.dat"
+
+   ! Sized from the environment so one source serves both the correctness test
+   ! (small, exact) and a benchmark (large enough for the device to matter).
+   n_sites = 8
+   n_per = 10
+   n_reps = 1
+   call get_environment_variable("MADLIB_N_SITES", env)
+   if (len_trim(env) > 0) read (env, *) n_sites
+   call get_environment_variable("MADLIB_N_PER", env)
+   if (len_trim(env) > 0) read (env, *) n_per
+   call get_environment_variable("MADLIB_REPS", env)
+   if (len_trim(env) > 0) read (env, *) n_reps
+   n_pairs = n_sites*n_per
+   allocate (n_neigh(n_sites), species_idx(n_pairs), neighbors_list(n_pairs))
+   allocate (rjs(n_pairs), thetas(n_pairs), phis(n_pairs), xyz(3*n_pairs))
 
    alpha_max = [6, 6]
    rcut_hard = 3.5d0
@@ -101,6 +116,8 @@ program soappredictdump
       alphas(i) = 2.d0*frand(seed) - 1.d0
    end do
 
+   call system_clock(c0, crate)
+   do i = 1, n_reps
 #ifdef MADLIB_GPU_DESC
    call madlib_soap_energy_forces_gpu(n_sites, n_pairs, n_sites, n_species, n_neigh, &
                                       neighbors_list, species_idx, rjs, thetas, phis, xyz, &
@@ -119,6 +136,7 @@ program soappredictdump
                               p_i, p_j, p_el, dim, n_sparse, qs_sp, alphas, v0, delta, zeta, &
                               0, 1, v, v_der)
    energies(1:n_sites) = v(1:n_sites)
+   forces = 0.d0
    ! The scatter pair_turbogap.cpp does: force on the neighbour atom of each
    ! pair is minus that pair's dV/dr.
    do k = 1, n_pairs
@@ -128,6 +146,10 @@ program soappredictdump
       forces(3*a) = forces(3*a) - v_der(3*k)
    end do
 #endif
+   end do
+   call system_clock(c1)
+   if (n_reps > 1) write (*, '(a,i0,a,f9.2,a)') "    ", n_sites, " sites: ", &
+      1000.d0*dble(c1 - c0)/dble(crate)/dble(n_reps), " ms per call"
 
    open (unit=11, file=trim(outfile), status="replace")
    write (11, '(i0,1x,i0)') n_sites, 3*n_sites

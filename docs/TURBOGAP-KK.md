@@ -336,7 +336,64 @@ Worth knowing separately: `OPENBLAS_NUM_THREADS=1` is slightly *faster* than
 letting OpenBLAS thread (4.55 s against 5.12 s at one rank), so the threaded
 BLAS is not helping here and is worth pinning.
 
-## 7. Stage 4, and why it is not a kernel port
+## 7. The device SOAP path, measured
+
+It works, and it is a shim rather than a port. TurboGAP's GPU `soap_turbo` is a
+drop-in for the CPU one -- same module `soap_turbo_desc`, same entry `get_soap`
+-- and takes `cublas_handle` and `gpu_stream` as arguments. `gap.f90`'s
+prediction does read module state, but `gpu_context` is `public` and
+`soap_backend_begin` needs only five fields of a `soap_turbo`, so both are
+reachable without `gpu_context_init` -- whose paired finalize calls
+`gpu_device_reset` and would destroy a context this code does not own.
+
+Agreement with the host, on a fixed pseudo-random configuration:
+
+| stage | max abs difference | what it exercises |
+| --- | --- | --- |
+| descriptor | 1.1e-12 | the forward chain, fully Kokkos-converted |
+| derivatives | 1.1e-12 | `gap_soap_descriptor.cu`, 9 raw launches + 1 tree reduction |
+| energies | 1.8e-11 | the sparse-GP prediction |
+| forces | 2.7e-11 | `gap_soap_forces.cu`, 3 more tree reductions |
+
+### Speed: 1.67x, not the 5x a careless measurement gives
+
+Wall clock on `alt` (one RTX A2000), 40 neighbours per site, host BLAS
+unthreaded (it makes no difference here -- 297 ms against 301 ms at 1024):
+
+| sites | host | device | |
+| --- | --- | --- | --- |
+| 64 | 20.7 ms | 56.8 ms | **0.36x** |
+| 256 | 103.7 ms | 71.7 ms | 1.45x |
+| 512 | 170.8 ms | 108.9 ms | 1.57x |
+| 1024 | 309.3 ms | 187.8 ms | 1.65x |
+| 2048 | 604.0 ms | 360.9 ms | 1.67x |
+
+The first measurement of this used `cpu_time` and reported 5.25x. That is
+processor time of the calling thread, which does not count a host thread parked
+waiting on the device, so it flattered the GPU by about three times. Wall clock
+is the honest number and 1.67x is it.
+
+1.67x on the 87.5% phase is about 1.5x overall -- worth having, and modest. The
+A2000 is an entry-level card; a datacenter GPU should do considerably better,
+and that is the measurement to repeat on Roihu rather than to extrapolate here.
+Below roughly 150 sites the device loses outright to launch and transfer.
+
+### Batching is mandatory, and the failure is already diagnosed
+
+At 4096 sites with 40 neighbours the device path dies:
+
+    GPUmem: device allocation FAILED: an illegal memory access was encountered
+    GPUmem   this rank      1.153 GB live in 21 buffers, peak    3.340 GB
+    GPUmem   The batching keywords are what fix this:
+    GPUmem     max_Gbytes_per_process       <- splits the SOAP loop
+
+3.34 GB peak on a 6 GB card, and 3072 sites is the last size that fits. This is
+the batch loop at `turbogap.f90:1792` with the memory model at
+`neighbors.f90:646`, and it is not optional: a LAMMPS rank holding a few
+thousand atoms is an ordinary case, not a large one. TurboGAP's own diagnostics
+name the fix, which is a good sign for reimplementing it faithfully.
+
+## 8. Stage 4, and why it is not a kernel port
 
 The obvious reading of stage 4 is "lift `gap_soap_*.cu` the way `gap_2b.cu` was
 lifted". That is the expensive way, and measuring the surface says so:
@@ -451,7 +508,7 @@ Three things to settle when it is done:
   reductions are `__shared__` trees over doubles, and a Kokkos reduction
   reassociates them. It is fine to *call*; it is not fine to rewrite.
 
-## 8. Toolchain notes for `alt`
+## 9. Toolchain notes for `alt`
 
 ```sh
 export PATH=/usr/local/cuda-13.4/bin:$PATH      # NOT the 12.0 on the default PATH
