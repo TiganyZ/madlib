@@ -178,6 +178,114 @@ contains
       end if
    end function v_der_view
 
+!  The derived basis state get_soap builds once and caches in module `save`
+!  variables: the orthonormalisation matrices W and S, which components a
+!  compressed descriptor keeps, and the multiplicity of each kept component.
+!
+!  Exported because a device path has to own them -- the kernels take them as
+!  device pointers, and the Fortran routine that would otherwise compute them
+!  is the one being replaced. Computed here by calling soap_turbo's own
+!  orthonormalisation rather than re-deriving it; only the bookkeeping around
+!  it is restated.
+!
+!  W and S are n_max x n_max column-major, block diagonal over species, with
+!  n_max = sum(alpha_max). `multiplicity` must be at least
+!  n_max*(n_max+1)/2 * (l_max+1)*(l_max+2)/2 long, which is the uncompressed
+!  bound; n_mult says how much was written. `skip` is n_soap_uncompressed long.
+   subroutine madlib_soap_basis(n_species, alpha_max, l_max, atom_sigma_r, rcut_hard, basis, &
+                                compress, n_nonzero, p_j, W, S, skip, multiplicity, n_mult) &
+      bind(c, name="madlib_soap_basis")
+      use soap_turbo_radial, only: get_orthonormalization_matrix_poly3, &
+                                   get_orthonormalization_matrix_poly3gauss, &
+                                   get_orthonormalization_matrix_poly3_tabulated
+
+      integer(c_int), value :: n_species
+      integer(c_int), value :: l_max
+      integer(c_int), value :: compress
+      integer(c_int), value :: n_nonzero
+      integer(c_int), intent(in) :: alpha_max(*)
+      integer(c_int), intent(in) :: p_j(*)
+      real(c_double), intent(in) :: atom_sigma_r(*)
+      real(c_double), intent(in) :: rcut_hard(*)
+      character(kind=c_char), intent(in) :: basis(*)
+      real(c_double), intent(out) :: W(*)
+      real(c_double), intent(out) :: S(*)
+      integer(c_int), intent(out) :: skip(*)
+      real(c_double), intent(out) :: multiplicity(*)
+      integer(c_int), intent(out) :: n_mult
+
+      real(dp), allocatable :: S_temp(:, :)
+      real(dp), allocatable :: W_temp(:, :)
+      integer :: am(1:n_species)
+      integer :: i, j, k, n, np, l, m, n_max, i_beg, i_end, counter, counter2
+      integer :: n_soap_uncompressed
+      real(dp) :: mult
+      character(len=32) :: b
+
+      am = alpha_max(1:n_species)
+      n_max = sum(am)
+      b = c_to_f_string(basis)
+
+      do i = 1, n_max*n_max
+         W(i) = 0.d0
+         S(i) = 0.d0
+      end do
+
+      i_end = 0
+      do i = 1, n_species
+         i_beg = i_end + 1
+         i_end = i_end + am(i)
+         allocate (S_temp(1:am(i), 1:am(i)))
+         allocate (W_temp(1:am(i), 1:am(i)))
+         S_temp = 0.d0
+         W_temp = 0.d0
+         if (trim(b) == "poly3gauss") then
+            call get_orthonormalization_matrix_poly3gauss(am(i), atom_sigma_r(i), rcut_hard(i), S_temp, W_temp)
+         else if (trim(b) == "poly3") then
+            call get_orthonormalization_matrix_poly3(am(i), S_temp, W_temp)
+         else
+            ! poly3tab and poly3operator share the tabulated basis.
+            call get_orthonormalization_matrix_poly3_tabulated(am(i), S_temp, W_temp)
+         end if
+         do j = 1, am(i)
+            do k = 1, am(i)
+               W((i_beg + j - 2)*n_max + i_beg + k - 1) = W_temp(k, j)
+               S((i_beg + j - 2)*n_max + i_beg + k - 1) = S_temp(k, j)
+            end do
+         end do
+         deallocate (S_temp, W_temp)
+      end do
+
+      n_soap_uncompressed = n_max*(n_max + 1)/2*(l_max + 1)
+      if (compress == 0) then
+         skip(1:n_soap_uncompressed) = 0
+      else
+         skip(1:n_soap_uncompressed) = 1
+         do i = 1, n_nonzero
+            skip(p_j(i)) = 0
+         end do
+      end if
+
+      counter = 0
+      counter2 = 0
+      do n = 1, n_max
+         do np = n, n_max
+            do l = 0, l_max
+               counter = counter + 1
+               if (skip(counter) /= 0) cycle
+               do m = 0, l
+                  counter2 = counter2 + 1
+                  mult = 1.d0
+                  if (n /= np) mult = mult*dsqrt(2.d0)
+                  if (m > 0) mult = mult*2.d0
+                  multiplicity(counter2) = mult
+               end do
+            end do
+         end do
+      end do
+      n_mult = counter2
+   end subroutine madlib_soap_basis
+
    function c_to_f_string(s) result(f)
       character(kind=c_char), intent(in) :: s(*)
       character(len=32) :: f

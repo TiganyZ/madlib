@@ -76,7 +76,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -393,6 +393,25 @@ kk)
   else
     compare_kk "glassy carbon, 91 atoms" in.pair_turbogap in.pair_turbogap_kk pair_turbogap
     compare_kk "core_pot probe, 3 close pairs" in.core_probe in.core_probe_kk core_probe
+  fi
+  ;;
+
+soapbasis)
+  leg "the exported SOAP basis orthonormalises and is counted right"
+  LIB=../lib/madlib
+  if [ ! -f "$LIB/libmadlib.a" ]; then
+    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  elif ! command -v gfortran >/dev/null; then
+    echo "    SKIP: no gfortran"
+  else
+    if gfortran -O2 -I "$LIB" soapbasisverify.f90 -o /tmp/mad_soapbasis \
+         "$LIB/libmadlib.a" -llapack -lblas 2>/tmp/mad_soapbasis.log; then
+      if /tmp/mad_soapbasis; then ok "W, S, skip and multiplicity are what they claim"
+      else bad "the exported basis is wrong"; fi
+    else
+      sed 's/^/     /' /tmp/mad_soapbasis.log | tail -5
+      bad "soapbasisverify did not build"
+    fi
   fi
   ;;
 

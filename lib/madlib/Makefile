@@ -32,6 +32,12 @@ SRC = turbogap/kinds.f90 \
 
 OBJ = $(SRC:.f90=.o)
 
+# Fortran modules must be compiled in dependency order, and SRC is already in
+# it. Nothing states that to make, so -j reorders them and the build fails on a
+# missing .mod -- which reads like a broken source tree rather than a race.
+# .NOTPARALLEL is the whole fix; the build is ~20 s serial.
+.NOTPARALLEL:
+
 libmadlib.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
@@ -39,6 +45,6 @@ libmadlib.a: $(OBJ)
 	$(FC) $(FFLAGS) -J. -c $< -o $@
 
 clean:
-	rm -f $(OBJ) *.mod libmadlib.a
+	rm -f $(OBJ) *.mod turbogap/*.mod libmadlib.a
 
 .PHONY: clean
