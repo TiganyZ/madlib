@@ -450,9 +450,21 @@ soapgpu)
          || ! /tmp/mad_desc_gpu /tmp/mad_desc_gpu.dat >/dev/null 2>&1; then
       bad "a descriptor binary did not run"
     else
-      $PYTHON compare_soap_desc.py /tmp/mad_desc_cpu.dat /tmp/mad_desc_gpu.dat
-      if [ $? -eq 0 ]; then ok "device and host agree on the descriptor"
-      else bad "the device descriptor differs from the host's"; fi
+      # The descriptor exercises the forward chain, which is fully converted to
+      # the Kokkos dispatch. The derivatives additionally exercise
+      # gap_soap_descriptor.cu's raw-CUDA half -- nine launches, including the
+      # __shared__ tree reduction at :208 that must not be reassociated. Worth
+      # running both: the forward pass agreeing says nothing about that half.
+      bad_any=0
+      for mode in descriptor derivatives; do
+        [ "$mode" = derivatives ] && arg=der || arg=
+        /tmp/mad_desc_cpu /tmp/mad_desc_cpu.dat $arg >/dev/null 2>&1
+        /tmp/mad_desc_gpu /tmp/mad_desc_gpu.dat $arg >/dev/null 2>&1
+        echo "    -- $mode"
+        $PYTHON compare_soap_desc.py /tmp/mad_desc_cpu.dat /tmp/mad_desc_gpu.dat || bad_any=1
+      done
+      if [ $bad_any -eq 0 ]; then ok "device and host agree on descriptor and derivatives"
+      else bad "the device SOAP differs from the host's"; fi
     fi
   fi
   ;;

@@ -34,12 +34,16 @@ program soapdescdump
    real(c_double) :: atom_sigma_t_scaling(n_species), amplitude_scaling(n_species)
    real(c_double) :: central_weight(n_species)
    real(c_double), allocatable :: soap(:), der(:)
+   integer :: do_der
    integer(8) :: seed
    integer :: i, j, p
-   character(len=256) :: outfile
+   character(len=256) :: outfile, arg2
 
    call get_command_argument(1, outfile)
    if (len_trim(outfile) == 0) outfile = "soapdesc.dat"
+   call get_command_argument(2, arg2)
+   do_der = 0
+   if (trim(arg2) == "der") do_der = 1
 
    alpha_max = [6, 6]
    rcut_hard = 3.5d0
@@ -58,8 +62,14 @@ program soapdescdump
    ! Computed rather than asked for, because madlib_soap_dim lives in the CPU
    ! shim and linking that would pull in the CPU soap_turbo beside the GPU one.
    dim = sum(alpha_max)*(sum(alpha_max) + 1)/2*(l_max + 1)
-   allocate (soap(dim*n_sites), der(1))
+   if (do_der /= 0) then
+      allocate (der(3*dim*n_pairs))
+   else
+      allocate (der(1))
+   end if
+   allocate (soap(dim*n_sites))
    soap = 0.d0
+   der = 0.d0
 
    n_neigh = n_per
    seed = 7_8
@@ -84,23 +94,34 @@ program soapdescdump
                                    global_scaling, atom_sigma_r, atom_sigma_r_scaling, &
                                    atom_sigma_t, atom_sigma_t_scaling, amplitude_scaling, 0, &
                                    central_weight, "poly3gauss"//c_null_char, &
-                                   "polynomial"//c_null_char, 0, 1, p_j, dim, 0, soap, der)
+                                   "polynomial"//c_null_char, 0, 1, p_j, dim, do_der, soap, der)
 #else
    call madlib_soap_descriptor(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, &
                                phis, alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
                                atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, &
                                atom_sigma_t_scaling, amplitude_scaling, 0, central_weight, &
                                "poly3gauss"//c_null_char, "polynomial"//c_null_char, 0, 1, &
-                               p_i, p_j, p_el, dim, 0, soap, der)
+                               p_i, p_j, p_el, dim, do_der, soap, der)
 #endif
 
    open (unit=11, file=trim(outfile), status="replace")
-   write (11, '(i0,1x,i0)') n_sites, dim
-   do i = 1, dim*n_sites
-      write (11, '(es24.17)') soap(i)
-   end do
+   if (do_der /= 0) then
+      write (11, '(i0,1x,i0)') n_pairs, 3*dim
+      do i = 1, 3*dim*n_pairs
+         write (11, '(es24.17)') der(i)
+      end do
+   else
+      write (11, '(i0,1x,i0)') n_sites, dim
+      do i = 1, dim*n_sites
+         write (11, '(es24.17)') soap(i)
+      end do
+   end if
    close (11)
-   write (*, '(a,i0,a,i0,a,a)') "    wrote ", n_sites, " x ", dim, " descriptor to ", trim(outfile)
+   if (do_der /= 0) then
+      write (*, '(a,i0,a,i0,a,a)') "    wrote ", n_pairs, " x ", 3*dim, " derivatives to ", trim(outfile)
+   else
+      write (*, '(a,i0,a,i0,a,a)') "    wrote ", n_sites, " x ", dim, " descriptor to ", trim(outfile)
+   end if
 
 contains
 
