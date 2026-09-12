@@ -16,13 +16,19 @@ FFLAGS  = -O2 -fPIC -cpp
 BLAS    = -llapack -lblas
 
 SRC = turbogap/kinds.f90 \
+      turbogap/elements.f90 \
+      turbogap/topology.f90 \
+      turbogap/splines.f90 \
       turbogap/soap_turbo_functions.f90 \
       turbogap/soap_turbo_radial.f90 \
       turbogap/soap_turbo_angular.f90 \
       turbogap/soap_turbo_compress.f90 \
       turbogap/soap_turbo.f90 \
+      turbogap/types.f90 \
       turbogap/local_properties.f90 \
-      madlib_soap.f90
+      turbogap/gap.f90 \
+      madlib_soap.f90 \
+      madlib_gap.f90
 
 OBJ = $(SRC:.f90=.o)
 

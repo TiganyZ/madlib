@@ -2,15 +2,24 @@
 
 project(madlib Fortran)
 
+# Module dependency order. tools/vendor_turbogap.sh lists the same order and
+# the two must agree: kinds first, gap.f90 last, types before anything that
+# uses the soap_turbo derived type.
 add_library(madlib STATIC
   turbogap/kinds.f90
+  turbogap/elements.f90
+  turbogap/topology.f90
+  turbogap/splines.f90
   turbogap/soap_turbo_functions.f90
   turbogap/soap_turbo_radial.f90
   turbogap/soap_turbo_angular.f90
   turbogap/soap_turbo_compress.f90
   turbogap/soap_turbo.f90
+  turbogap/types.f90
   turbogap/local_properties.f90
-  madlib_soap.f90)
+  turbogap/gap.f90
+  madlib_soap.f90
+  madlib_gap.f90)
 
 # -cpp is load-bearing. turbogap/local_properties.f90 is a verbatim copy of
 # TurboGAP's and carries #ifdef _GPU around its device path; without the

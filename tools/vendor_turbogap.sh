@@ -35,9 +35,21 @@ repo=$(cd "$here/.." && pwd)
 DEST=$repo/lib/madlib/turbogap
 PROVENANCE=$DEST/PROVENANCE.md
 
-# Seven files, and where each lives in a TurboGAP checkout. soap_turbo is a
-# submodule of it, so two different source directories are involved.
-FILES_SRC="kinds.f90 local_properties.f90"
+# Where each file lives in a TurboGAP checkout. soap_turbo is a submodule of
+# it, so two different source directories are involved.
+#
+# The order matters to the build, not to the copying: it is the module
+# dependency order, and lib/madlib/CMakeLists.txt repeats it. kinds first,
+# gap.f90 last.
+#
+# gap.f90 and its four dependencies are here for pair_style turbogap, which
+# evaluates a whole TurboGAP potential rather than one local property. That is
+# four separate terms -- soap_turbo, distance_2b, angle_3b and core_pot -- and
+# every fitted potential worth running uses all of them, so reimplementing the
+# energy would mean reimplementing all four. gap.f90's CPU path needs no MPI
+# and takes its arguments plainly, so it is cheaper to compile TurboGAP's own
+# verified arithmetic than to write it again.
+FILES_SRC="kinds.f90 elements.f90 topology.f90 splines.f90 types.f90 local_properties.f90 gap.f90"
 FILES_SOAP="soap_turbo_functions.f90 soap_turbo_radial.f90 soap_turbo_angular.f90 soap_turbo_compress.f90 soap_turbo.f90"
 
 check_only=0
