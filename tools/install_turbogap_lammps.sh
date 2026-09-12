@@ -55,8 +55,8 @@ stage_deps() {
     done
     [ -n "$missing" ] && die "missing tools:$missing"
 
-    bootstrap_cmake
-    step "cmake $(cmake --version | head -1 | awk '{print $3}') (symmetrix needs >= 3.27)"
+    bootstrap_build_tools
+    step "cmake $(cmake --version | head -1 | awk '{print $3}') | meson $(meson --version) (symmetrix needs cmake >= 3.27)"
     step "$(g++ --version | head -1)"
     step "$(gfortran --version | head -1)"
     [ -n "$HOST_CXX" ] && step "host compiler for nvcc: $HOST_CXX"
@@ -69,18 +69,28 @@ stage_deps() {
     fi
 }
 
-bootstrap_cmake() {
-    # A recent cmake is a hard requirement and is often missing on a cluster
-    # node. pip has one and needs no root.
-    if have cmake && [ "$(cmake --version | head -1 | awk '{print $3}' | cut -d. -f1-2)" \
-                       \> "3.26" ]; then
-        return
-    fi
-    step "installing cmake into the venv (none new enough on PATH)"
+bootstrap_build_tools() {
+    # cmake, meson and ninja are all hard requirements and a cluster node may
+    # have none of them. pip has all three and needs no root.
     [ -d "$PREFIX/venv" ] || python3 -m venv "$PREFIX/venv"
-    "$PREFIX/venv/bin/pip" install --quiet --upgrade cmake
     export PATH="$PREFIX/venv/bin:$PATH"
-    have cmake || die "cmake still not available after pip install"
+
+    local want=""
+    if ! have cmake || [ "$(cmake --version | head -1 | awk '{print $3}' | cut -d. -f1-2)" \
+                         \< "3.27" ]; then
+        want="$want cmake"
+    fi
+    have meson || want="$want meson"
+    have ninja || want="$want ninja"
+
+    if [ -n "$want" ]; then
+        step "installing into the venv:$want"
+        "$PREFIX/venv/bin/pip" install --quiet --upgrade $want || die "could not install$want"
+        hash -r
+    fi
+    for t in cmake meson ninja; do
+        have $t || die "$t still not available"
+    done
 }
 
 detect_gpu_arch() {
@@ -142,6 +152,7 @@ stage_lammps() {
 
 stage_quip() {
     say "quip (pair_style quip, for GAP potentials)"
+    bootstrap_build_tools
     local quip=$PREFIX/QUIP
     if [ ! -d "$quip/.git" ]; then
         git clone --recursive --depth 1 \
@@ -238,6 +249,7 @@ cmake_flags() {
 
 stage_build() {
     say "building lammps"
+    bootstrap_build_tools
     local build=$PREFIX/lammps/build
     ensure_dir "$build"
     # shellcheck disable=SC2046
