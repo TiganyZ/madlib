@@ -39,7 +39,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -348,6 +348,22 @@ PY
     else bad "a periodic sum q_i r_i was accepted"; fi
   fi
   ;;
+
+pair)
+  leg "a whole TurboGAP potential as pair_style turbogap"
+  if ! $LMP -in in.pair_turbogap -log none >/tmp/pair_tg.log 2>&1; then
+    if grep -q "Unknown pair style" /tmp/pair_tg.log; then
+      echo "    SKIP: built without the Fortran backend (-D MADLIB_ENABLE_TURBOGAP=on)"
+    else
+      sed 's/^/     /' /tmp/pair_tg.log | tail -12
+      bad "pair_style turbogap did not run"
+    fi
+  else
+    $PYTHON compare_pair_turbogap.py
+    if [ $? -eq 0 ]; then ok "the four terms reproduce TurboGAP"
+    else bad "pair_style turbogap disagrees with TurboGAP"; fi
+  fi
+;;
 
 gap)
   leg "the soap_turbo backend against TurboGAP itself"

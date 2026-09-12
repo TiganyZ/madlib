@@ -23,6 +23,7 @@ SOAP/GAP potential.
 | PDF `g(r)` / `D(r)` | working, validated |
 | `S(q)`, XRD, ND | working, validated |
 | **XPS**, and any spectrum from a broadened per-atom scalar | working, validated |
+| **`pair_style turbogap`** | working -- a whole .gap potential, all four terms, to 1.1e-09 on forces |
 | **The per-atom property layer** | working -- `turbogap`, `coord` and `table` backends |
 | **TurboGAP `.gap` models, unchanged** | working -- reproduces TurboGAP's own binding energies to 1.2e-9 relative |
 | Experimentally biased MC | working -- via LAMMPS's own MC fixes, no new MC code |
@@ -111,6 +112,75 @@ picks the default weighting.
 | `window` | `lorch` | Lorch window damping the truncation ringing |
 | `window_cut` | `rmax` | its cutoff -- the **transform range**, not the neighbour cutoff |
 | `lp`, `polarization` | `no`, `1.0` | powder Lorentz-polarization factor |
+
+### `pair_style turbogap`
+
+A whole TurboGAP potential, evaluated in LAMMPS, reading a `.gap` file as it
+stands.
+
+```lammps
+pair_style  turbogap e0 C -.16138053 e0 O 0.0
+pair_coeff  * * gap_files/CO.gap C O
+```
+
+`pair_coeff` takes the potential file and then one species name per LAMMPS atom
+type, in type order; `NULL` marks a type the potential does not describe. That
+list fixes the species numbering the potential is indexed by.
+
+| `pair_style` keyword | default | meaning |
+|---|---|---|
+| `e0 <species> <value>` | 0 | per-atom energy offset. A TurboGAP **input** parameter, not part of the `.gap` file, so it has to be given here or the energy is offset by a constant. Named rather than positional, because a silently mismatched per-species list reads as a bad fit rather than as a typo |
+| `core_pot_cutoff` | `1e10` | truncation applied to the tabulated core potential **as it is read**, so the same file is a different potential under a different value |
+| `core_pot_buffer` | `1.0` | width of the cosine taper up to that cutoff |
+
+**It evaluates four terms, because a potential has four.**
+
+```
+E = E_soap_turbo + E_distance_2b + E_angle_3b + E_core_pot
+```
+
+Of the potentials in the test data exactly one -- `water_dipole.gap` -- is
+`soap_turbo` alone, and that one is a dipole model with no energy. Every fitted
+potential anyone runs carries 2b, 3b and `core_pot` blocks beside its SOAP
+block, so a pair style evaluating only the SOAP term would report a
+plausible-looking number missing three contributions.
+
+The arithmetic is TurboGAP's own rather than a transcription: the 2b, 3b and
+core_pot routines in `lib/madlib/turbogap/gap.f90` are compiled and called. On
+the 91-atom glassy-carbon cell, against TurboGAP itself:
+
+| | agreement |
+|---|---|
+| forces | 1.1e-09 relative |
+| energy | 4.1e-09 relative |
+| `distance_2b`, `angle_3b`, `core_pot` | exact to the printed digit |
+
+`TURBOGAP_TERMS=1` in the environment prints each term's energy separately,
+which is the only useful unit of debugging here -- a wrong total says nothing,
+"2b and soap agree and 3b does not" names the bug.
+
+**The bias composes with it**, as with any other potential:
+
+```lammps
+pair_style  turbogap e0 C -.16138053
+pair_coeff  * * carbon.gap C
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.1
+fix     xrd all mad/xrd c_gr target measured.fq q 1.05 9.97 201 species C gamma 5.0
+```
+
+**Untested rather than unsupported**: a `P_transformation` compression file is
+parsed, and the general `(i, j, element)` triple it defines is what `get_soap`
+takes anyway, so it should work -- but no potential in the test data uses one,
+so that path has never been run. The older one-index-per-line compression file
+that `carbon.gap` and the CLi potentials use is exercised, as is
+`compress_mode`.
+
+**Genuinely not handled**: the TS/MBD dispersion correction, which TurboGAP
+configures from its *input file* rather than from the `.gap` (`energy_vdw` in
+its trajectory header) and which has no block here to read; and a dipole model,
+which carries no energy to contribute. A dispersion term written as a
+`core_pot` block -- which is how `carbon.gap` ships one, commented out -- is
+read like any other `core_pot`.
 
 ### `compute ID group mad/property/*`
 
