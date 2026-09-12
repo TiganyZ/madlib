@@ -10,8 +10,17 @@ read at all, and without it the backend options are accepted, cached and
 silently ignored.
 """
 
+import os
 import re
 import sys
+
+# The Kokkos variants live in src/KOKKOS, not in src/MADLIB. That is LAMMPS's
+# own arrangement -- every Kokkos style sits beside the package's Kokkos
+# machinery rather than with its host counterpart -- and it is also what makes
+# them build only when PKG_KOKKOS is on, without a conditional anywhere.
+KOKKOS_FILES = ["pair_turbogap_kokkos.h", "pair_turbogap_kokkos.cpp", "mad_neigh_kokkos.h"]
+
+PAIR_STYLES = [("turbogap", "pair_turbogap"), ("turbogap/kk", "pair_turbogap_kokkos")]
 
 FIX_STYLES = [("mad/ir", "fix_mad_ir"), ("mad/pdf", "fix_mad"), ("mad/sq", "fix_mad"),
               ("mad/xps", "fix_mad"), ("mad/xrd", "fix_mad")]
@@ -74,14 +83,47 @@ def add_gitignore(root):
     return n
 
 
+def link_kokkos(root, madlib):
+    """Put the Kokkos variants where LAMMPS looks for Kokkos styles.
+
+    They go in src/KOKKOS rather than src/MADLIB, and that placement is load
+    bearing rather than tidy: LAMMPS builds src/KOKKOS only when PKG_KOKKOS is
+    on, so a file there needs no conditional to be left out of a non-Kokkos
+    build, and the style scanner that writes style_pair.h only reads package
+    directories that are enabled. A Kokkos style left in src/MADLIB would
+    either fail to compile without Kokkos or never be registered with it.
+    """
+    import os
+    n = 0
+    dest = f"{root}/src/KOKKOS"
+    if not os.path.isdir(dest):
+        return -1
+    for name in KOKKOS_FILES:
+        src = os.path.abspath(f"{madlib}/src/KOKKOS/{name}")
+        link = f"{dest}/{name}"
+        if os.path.islink(link) and os.readlink(link) == src:
+            continue
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(src, link)
+        n += 1
+    return n
+
+
 def main():
     if len(sys.argv) != 2:
         raise SystemExit("usage: register_madlib.py path/to/lammps")
     root = sys.argv[1]
+    madlib = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     print("  STANDARD_PACKAGES:", "added" if add_to_standard_packages(root) else "already there")
     print("  PKG_WITH_INCL:    ", "added" if add_to_pkg_with_incl(root) else "already there")
     print("  doc index:        ", index_docs(root), "entries added")
     print("  src/.gitignore:   ", add_gitignore(root), "entries added")
+    k = link_kokkos(root, madlib)
+    if k < 0:
+        print("  KOKKOS variants:   src/KOKKOS is absent; nothing linked")
+    else:
+        print("  KOKKOS variants:  ", k, "linked into src/KOKKOS")
 
 
 if __name__ == "__main__":

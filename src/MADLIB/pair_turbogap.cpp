@@ -83,6 +83,7 @@ PairTurboGAP::PairTurboGAP(LAMMPS *lmp) : Pair(lmp)
   one_coeff = 1;           // pair_coeff * * only
   manybody_flag = 1;       // SOAP and 3b are not pairwise
   centroidstressflag = CENTROID_NOTAVAIL;
+  comm_reverse = 3;    // a force vector per ghost; see pack_reverse_comm
   report_terms = (getenv("TURBOGAP_TERMS") != nullptr) ? 1 : 0;
 }
 
@@ -234,8 +235,6 @@ void PairTurboGAP::pack_species_table()
 void PairTurboGAP::init_style()
 {
   if (!loaded) error->all(FLERR, "pair_style turbogap: no potential read; use pair_coeff");
-  if (force->newton_pair == 0)
-    error->all(FLERR, "pair_style turbogap needs newton pair on");
 
   // A full list: the SOAP descriptor of site i needs every neighbour of i, and
   // a half list would give each pair to only one of its two atoms.
@@ -538,8 +537,44 @@ void PairTurboGAP::compute(int eflag, int vflag)
   // deriving the LAMMPS convention from it by inspection is exactly the kind
   // of thing that is wrong by a factor of two without looking wrong. f.r needs
   // only the forces, which are checked directly.
+  // Before the fold, not after: virial_fdotr_compute sums r.f over local AND
+  // ghost atoms, so it wants the ghost forces still sitting where they were
+  // computed.
   if (vflag_fdotr) virial_fdotr_compute();
+
+  // With newton pair on, LAMMPS folds the ghosts itself after compute and
+  // doing it here too would count them twice.
+  if (!force->newton_pair) comm->reverse_comm(this);
 #endif
+}
+
+/* ----------------------------------------------------------------------
+   The ghost-force fold. Only reached with newton pair off; see the header.
+------------------------------------------------------------------------- */
+
+int PairTurboGAP::pack_reverse_comm(int n, int first, double *buf)
+{
+  double **f = atom->f;
+  int m = 0;
+  const int last = first + n;
+  for (int i = first; i < last; i++) {
+    buf[m++] = f[i][0];
+    buf[m++] = f[i][1];
+    buf[m++] = f[i][2];
+  }
+  return m;
+}
+
+void PairTurboGAP::unpack_reverse_comm(int n, int *list, double *buf)
+{
+  double **f = atom->f;
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    const int j = list[i];
+    f[j][0] += buf[m++];
+    f[j][1] += buf[m++];
+    f[j][2] += buf[m++];
+  }
 }
 
 /* ---------------------------------------------------------------------- */

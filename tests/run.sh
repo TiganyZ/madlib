@@ -39,7 +39,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -348,6 +348,21 @@ PY
     else bad "a periodic sum q_i r_i was accepted"; fi
   fi
   ;;
+
+kk)
+  leg "turbogap/kk reproduces turbogap"
+  if ! $LMP -h 2>/dev/null | grep -q "turbogap/kk"; then
+    echo "    SKIP: built without the KOKKOS package"
+  else
+    $LMP -in in.pair_turbogap -log none >/tmp/pair_tg.log 2>&1
+    TURBOGAP_CHECK_NEIGH=1 $LMP -k on g 1 -sf kk -in in.pair_turbogap_kk \
+        -log none >/tmp/pair_tg_kk.log 2>&1
+    grep -E "sites, .* pairs|inconsistent" /tmp/pair_tg_kk.log | sed 's/^/     /'
+    $PYTHON compare_pair_kk.py
+    if [ $? -eq 0 ]; then ok "the device neighbour build changes no answer"
+    else bad "turbogap/kk disagrees with turbogap"; fi
+  fi
+;;
 
 pair)
   leg "a whole TurboGAP potential as pair_style turbogap"

@@ -78,6 +78,16 @@ class PairTurboGAP : public Pair {
   double init_one(int, int) override;
   double memory_usage() override;
 
+  // Fold forces from ghosts back onto the atoms that own them.
+  //
+  // LAMMPS does this for us when newton pair is on, and the KOKKOS package
+  // forbids newton on with a full neighbour list -- which a SOAP descriptor
+  // has to have, since site i needs every neighbour of i. So with newton off
+  // the fold is ours to do, and without it every contribution a site makes to
+  // a neighbour it does not own is silently dropped.
+  int pack_reverse_comm(int, int, double *) override;
+  void unpack_reverse_comm(int, int *, double *) override;
+
  protected:
   MADGapPotential pot;
   bool loaded = false;
@@ -123,7 +133,11 @@ class PairTurboGAP : public Pair {
   int report_terms = 0;
 
   void allocate();
-  void build_neighbours();
+  // Virtual because the Kokkos variant replaces exactly this and nothing
+  // else: it builds the same arrays on the device and copies them back, so
+  // the terms below cannot tell which built them. That is what makes
+  // turbogap/kk checkable against turbogap -- same compute, one input.
+  virtual void build_neighbours();
   void pack_species_table();
   void add_soap_terms(int eflag);
   void add_pair_terms(int eflag);
