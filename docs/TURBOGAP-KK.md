@@ -296,6 +296,46 @@ have done stages 1 and 2 is that they are checkable**, and they leave the
 device arrays and the dispatch shim that stage 4 needs. SOAP is 87.5% of the
 cost and the only thing worth moving.
 
+### MPI, measured
+
+`pair_turbogap` is correct under decomposition -- 4 ranks against 1 gives
+max|dF| = 5.5e-08 eV/A, the reassociation floor, with an identical energy. The
+`pairmpi` leg checks this now; nothing did before.
+
+It does not scale on `alt`, and the per-phase profile says exactly why. 1638
+atoms, bound to physical cores, `OPENBLAS_NUM_THREADS=1`:
+
+| ranks | loop | speedup |
+| --- | --- | --- |
+| 1 | 5.84 s | -- |
+| 2 | 3.24 s | 1.80x |
+| 3 | 2.36 s | **2.48x** |
+| 6 | 3.02 s | 1.93x |
+
+It peaks at three ranks and then goes backwards. The phases scale very
+differently (728 atoms, rank 0):
+
+| phase | 1 rank | 12 ranks | |
+| --- | --- | --- | --- |
+| neighbour build | 2.76 ms | 0.28 ms | 9.9x |
+| 2b + 3b + core_pot | 55.9 ms | 6.3 ms | 8.9x |
+| **`soap_turbo`** | **440 ms** | **238 ms** | **1.8x** |
+
+Everything scales except SOAP. Two things are behind it, and neither is a bug
+in this code: `alt` is an i5-11600 -- **6 physical cores**, not 12, on
+dual-channel memory -- and SOAP is the memory-heavy phase, so it saturates
+bandwidth long before it runs out of cores. The ghost fraction makes it worse:
+at 12 ranks each rank holds 61 local atoms against 1317 ghosts.
+
+Two things follow. **`alt` is not evidence about production** -- a many-core
+node with eight memory channels, or a GPU, is a different machine and this
+measurement does not transfer. And **MPI is not a substitute for the GPU work**:
+2.5x on this box does not change the case for moving SOAP.
+
+Worth knowing separately: `OPENBLAS_NUM_THREADS=1` is slightly *faster* than
+letting OpenBLAS thread (4.55 s against 5.12 s at one rank), so the threaded
+BLAS is not helping here and is worth pinning.
+
 ## 7. Stage 4, and why it is not a kernel port
 
 The obvious reading of stage 4 is "lift `gap_soap_*.cu` the way `gap_2b.cu` was
