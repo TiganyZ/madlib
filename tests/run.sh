@@ -23,6 +23,12 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 LMP=${LMP:-../../lammps/build/lmp}
 PYTHON=${PYTHON:-python3}
 RANKS=${RANKS:-4}
+# Open MPI's shared-memory transport uses Cross Memory Attach, which needs
+# ptrace permission. On a host with kernel.yama.ptrace_scope = 2 (alt is one)
+# every transfer fails with "Read -1, expected N, errno = 1" and the run dies
+# after step 0. Turning the single-copy mechanism off costs a little bandwidth
+# and makes it work.
+MPIRUN_EXTRA=${MPIRUN_EXTRA:---mca btl_vader_single_copy_mechanism none}
 XYZ=/home/tigany/test/turbogap_tests/xrd_mad/atoms.xyz
 
 # Fitted potentials live in the turbogap_tests data repository, not here: they
@@ -70,7 +76,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -387,6 +393,29 @@ kk)
   else
     compare_kk "glassy carbon, 91 atoms" in.pair_turbogap in.pair_turbogap_kk pair_turbogap
     compare_kk "core_pot probe, 3 close pairs" in.core_probe in.core_probe_kk core_probe
+  fi
+  ;;
+
+pairmpi)
+  leg "pair_turbogap on 1 rank against $RANKS"
+  rm -f md_mpi.dump
+  $LMP -in in.md_mpi -log none >/tmp/mad_pair_1.log 2>&1
+  mv md_mpi.dump /tmp/mad_pair_1.dump 2>/dev/null
+  rm -f md_mpi.dump
+  mpirun --oversubscribe $MPIRUN_EXTRA -np "$RANKS" $LMP -in in.md_mpi -log none \
+      >/tmp/mad_pair_n.log 2>&1
+  if [ ! -e md_mpi.dump ] || [ ! -e /tmp/mad_pair_1.dump ]; then
+    grep -ih "error\|errno" /tmp/mad_pair_1.log /tmp/mad_pair_n.log | head -3 | sed 's/^/     /'
+    bad "a run did not produce a trajectory"
+  else
+    # Ranks partition the sites differently, so a site's neighbours arrive in a
+    # different order and the force adjoint reassociates -- the same ~1e-9
+    # relative floor every other comparison here sits at. Absolute, because a
+    # force component near zero has no meaningful relative error.
+    $PYTHON compare_pair_md.py /tmp/mad_pair_1.dump /tmp/mad_pair_1.log \
+        "${RANKS}_ranks" md_mpi.dump /tmp/mad_pair_n.log
+    if [ $? -eq 0 ]; then ok "the decomposition changes no answer"
+    else bad "pair_turbogap disagrees with itself across ranks"; fi
   fi
   ;;
 

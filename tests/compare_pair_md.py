@@ -12,8 +12,18 @@ usage: compare_pair_md.py <ref_dump> <ref_log> <label> <dump> <log> [...]
 """
 import sys
 
-F_TOL = 1e-6     # eV/A, absolute. The bug this guards against is ~1e+01.
-E_TOL = 1e-6     # eV, on the final potential energy.
+# eV/A absolute, and eV on the final potential energy.
+#
+# The floor these sit above is reassociation: newton off against newton on is
+# bit-identical (0.0), turbogap/kk differs by ~6e-08, and a 4-rank against
+# 1-rank decomposition by ~5.5e-08. 5e-07 leaves roughly a factor of ten over
+# that and still catches a real error -- the stale-ghost-force bug this leg was
+# written for showed up as 8.8e+01.
+#
+# 1e-06 was the first choice and it was too loose to mean much: a deliberate
+# 1e-06 perturbation passed it.
+F_TOL = 5e-7
+E_TOL = 1e-6
 
 
 def final_forces(path):
