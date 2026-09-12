@@ -111,20 +111,42 @@ def link_kokkos(root, madlib):
     return n
 
 
+def check_preconditions(root, madlib):
+    """Fail with something readable rather than a traceback three steps later.
+
+    src/MADLIB has to be linked into the LAMMPS tree BEFORE this runs, because
+    add_gitignore lists it. Without the check, that step raised
+    FileNotFoundError, link_kokkos never ran, and the failure surfaced much
+    later as cmake reporting a missing mad_gap_2b_kokkos.cpp -- which points at
+    the wrong thing entirely.
+    """
+    if not os.path.isdir(f"{root}/cmake"):
+        raise SystemExit(f"ERROR: {root} does not look like a LAMMPS checkout (no cmake/)")
+    if not os.path.isdir(f"{root}/src/MADLIB"):
+        raise SystemExit(
+            f"ERROR: {root}/src/MADLIB is missing.\n"
+            f"       Link the package into the tree before registering it:\n"
+            f"         ln -sfn {madlib}/src/MADLIB {root}/src/MADLIB\n"
+            f"         ln -sfn {madlib}/lib/madlib {root}/lib/madlib")
+
+
 def main():
     if len(sys.argv) != 2:
         raise SystemExit("usage: register_madlib.py path/to/lammps")
     root = sys.argv[1]
     madlib = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    check_preconditions(root, madlib)
     print("  STANDARD_PACKAGES:", "added" if add_to_standard_packages(root) else "already there")
     print("  PKG_WITH_INCL:    ", "added" if add_to_pkg_with_incl(root) else "already there")
     print("  doc index:        ", index_docs(root), "entries added")
-    print("  src/.gitignore:   ", add_gitignore(root), "entries added")
+    # Before the gitignore pass, which is cosmetic: this one is load bearing,
+    # and a failure in the cosmetic step must not be able to skip it.
     k = link_kokkos(root, madlib)
     if k < 0:
         print("  KOKKOS variants:   src/KOKKOS is absent; nothing linked")
     else:
         print("  KOKKOS variants:  ", k, "linked into src/KOKKOS")
+    print("  src/.gitignore:   ", add_gitignore(root), "entries added")
 
 
 if __name__ == "__main__":
