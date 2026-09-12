@@ -387,11 +387,40 @@ At 4096 sites with 40 neighbours the device path dies:
     GPUmem   The batching keywords are what fix this:
     GPUmem     max_Gbytes_per_process       <- splits the SOAP loop
 
-3.34 GB peak on a 6 GB card, and 3072 sites is the last size that fits. This is
+3.34 GB peak on a 6 GB card, and 3072 sites is the last size that fits. With
+a 1 GB budget the same configuration runs in five batches and agrees with the
+host to 7.3e-12 on energies and 5.9e-11 on forces.
+
+Splitting costs nothing measurable, and at this size it is slightly *faster*:
+2048 sites takes 399 ms in one batch and 350-365 ms in two to eleven. So
+batching can be on by default rather than reserved for configurations that
+would otherwise fail. This is
 the batch loop at `turbogap.f90:1792` with the memory model at
 `neighbors.f90:646`, and it is not optional: a LAMMPS rank holding a few
 thousand atoms is an ordinary case, not a large one. TurboGAP's own diagnostics
 name the fix, which is a good sign for reimplementing it faithfully.
+
+### One soap_turbo per binary, and the linker will not tell you
+
+The CPU and GPU `soap_turbo` share a module name, `soap_turbo_desc`, and
+therefore a symbol: `__soap_turbo_desc_MOD_get_soap`. Their `get_soap` takes
+**34 arguments and 48**.
+
+Linking both succeeds. An explicit `.o` beats an archive member -- the archive
+is only searched for symbols still unresolved -- so whichever is named directly
+wins, and a caller compiled against the other `.mod` then makes a 34-argument
+call into a 48-argument routine. No diagnostic at any stage: not a link error,
+not a warning, just undefined behaviour at runtime.
+
+This is why the tests build two binaries rather than one, and it constrains the
+LAMMPS integration: **a MADLIB build has one SOAP backend, chosen at configure
+time**, not two selectable at runtime. `pair_style turbogap` and
+`turbogap/kk` can both exist in a GPU build, but they share whichever
+`soap_turbo` was linked; the CPU fallback for a machine without a GPU is a
+separate build, which is how LAMMPS treats KOKKOS anyway.
+
+`tools/check_one_soap_turbo.sh` is the guard, meant to sit in front of any link
+that mixes `libmadlib.a` with the device objects.
 
 ## 8. Stage 4, and why it is not a kernel port
 
