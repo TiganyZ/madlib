@@ -71,6 +71,22 @@ fortran_check() {
   if "/tmp/mad_$stem"; then ok "$what"; else bad "$what -- it does not"; fi
 }
 
+# Build one source twice: once against the CPU soap_turbo, once against the
+# GPU one. They share a module name and an entry point, so they cannot be
+# linked into the same binary; two binaries is the only way to compare them.
+# $1 source stem, $2 host binary, $3 device binary.
+build_cpu_and_gpu() {
+  local stem=$1 hostbin=$2 devbin=$3
+  local lib=../lib/madlib
+  local g=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
+  gfortran -O2 -cpp -ffree-line-length-none -I "$lib" "$stem.f90" -o "$hostbin" \
+      "$lib/libmadlib.a" -llapack -lblas 2>/tmp/mad_gpubuild.log || return 1
+  ${FC:-mpif90} -O2 -cpp -ffree-line-length-none -fallow-argument-mismatch \
+      -DMADLIB_GPU_DESC -I "$g" "$stem.f90" -o "$devbin" "$g"/*.o "$g"/cu/*.o \
+      -L"${CUDA_LIB:-/usr/local/cuda-13.4/lib64}" -lcudart -lcublas -lcuda -lstdc++ \
+      -llapack -lblas 2>>/tmp/mad_gpubuild.log || return 1
+}
+
 compare_kk() {
   local label=$1 hin=$2 kin=$3 stem=$4
   local hlog=/tmp/${stem}_host.log klog=/tmp/${stem}_kk.log
@@ -98,7 +114,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu soappredict ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -465,6 +481,33 @@ soapgpu)
       done
       if [ $bad_any -eq 0 ]; then ok "device and host agree on descriptor and derivatives"
       else bad "the device SOAP differs from the host's"; fi
+    fi
+  fi
+  ;;
+
+soappredict)
+  leg "the device SOAP energies and forces reproduce the host's"
+  LIB=../lib/madlib
+  GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
+  if [ ! -f "$LIB/libmadlib.a" ]; then
+    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  elif [ ! -d "$GPUOBJ" ]; then
+    echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
+  else
+    rm -f /tmp/mad_pred_cpu.dat /tmp/mad_pred_gpu.dat
+    if ! build_cpu_and_gpu soappredictdump /tmp/mad_pred_cpu /tmp/mad_pred_gpu; then
+      sed 's/^/     /' /tmp/mad_gpubuild.log | tail -6
+      bad "the prediction binaries did not build"
+    elif ! /tmp/mad_pred_cpu /tmp/mad_pred_cpu.dat >/dev/null 2>&1 \
+         || ! /tmp/mad_pred_gpu /tmp/mad_pred_gpu.dat >/dev/null 2>&1; then
+      bad "a prediction binary did not run"
+    else
+      # This is the leg that reaches gap_soap_forces.cu -- get_soap_energy_and_forces
+      # calls gpu_final_soap_forces_virial at gap.f90:391 -- and so the three
+      # __shared__ tree reductions there. Nothing before it touched them.
+      $PYTHON compare_soap_predict.py /tmp/mad_pred_cpu.dat /tmp/mad_pred_gpu.dat
+      if [ $? -eq 0 ]; then ok "device and host agree on energies and forces"
+      else bad "the device prediction differs from the host's"; fi
     fi
   fi
   ;;

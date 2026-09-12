@@ -29,9 +29,13 @@ NVCC_EXTRA="--expt-extended-lambda --expt-relaxed-constexpr"
 FC=${FC:-mpif90}
 FFLAGS="-O2 -fPIC -cpp -ffree-line-length-none -fallow-argument-mismatch -D_GPU -D_MPIF90"
 
-# In dependency order. soap_turbo.f90 last: it uses all of them.
+# In dependency order; make is not doing it for us here. gap.f90 comes last of
+# TurboGAP's own because it uses types and local_properties, and the sparse-GP
+# prediction lives in it -- which is why the list is longer than the descriptor
+# alone would need.
 FORTRAN="kinds fortran_cuda_interfaces soap_turbo_functions soap_turbo_radial
-         soap_turbo_angular soap_turbo_compress soap_turbo"
+         soap_turbo_angular soap_turbo_compress soap_turbo
+         elements topology splines types gpu_context_gpu local_properties gap"
 
 # orthonormalization_kernels.cc is not built, and neither does TurboGAP build
 # it: its own Makefile has it commented out of SRC_CC, "deliberately disabled,
@@ -61,8 +65,13 @@ require_tree() {
 
 gather_sources() {
     local src=$1 out=$2
-    cp "$src/kinds.f90" "$src/fortran_cuda_interfaces.f90" "$out/"
+    # soap_turbo_gpu/src first, then src/ -- so the GPU soap_turbo wins over the
+    # CPU one of the same name if both are ever present.
     cp "$src/soap_turbo_gpu/src/"*.f90 "$out/"
+    for f in kinds fortran_cuda_interfaces elements topology splines types \
+             gpu_context_gpu local_properties gap; do
+        cp "$src/$f.f90" "$out/"
+    done
     cp "$MADLIB/lib/madlib/madlib_soap_gpu.f90" "$out/"
 }
 
