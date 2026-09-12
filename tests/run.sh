@@ -49,6 +49,28 @@ have() { [ -e "$1" ]; }
 # stem. Both dumps are removed first: a run that dies leaves the previous
 # run's dump in place, and comparing those two reports whatever agreement the
 # last good pair happened to have.
+# Build and run a standalone Fortran driver against libmadlib. $1 is the source
+# stem in this directory, $2 what a pass means.
+fortran_check() {
+  local stem=$1 what=$2
+  local lib=../lib/madlib
+  if [ ! -f "$lib/libmadlib.a" ]; then
+    echo "    SKIP: $lib/libmadlib.a is not built (make -C $lib)"
+    return
+  fi
+  if ! command -v gfortran >/dev/null; then
+    echo "    SKIP: no gfortran"
+    return
+  fi
+  if ! gfortran -O2 -I "$lib" "$stem.f90" -o "/tmp/mad_$stem" \
+        "$lib/libmadlib.a" -llapack -lblas 2>"/tmp/mad_$stem.log"; then
+    sed 's/^/     /' "/tmp/mad_$stem.log" | tail -5
+    bad "$stem did not build"
+    return
+  fi
+  if "/tmp/mad_$stem"; then ok "$what"; else bad "$what -- it does not"; fi
+}
+
 compare_kk() {
   local label=$1 hin=$2 kin=$3 stem=$4
   local hlog=/tmp/${stem}_host.log klog=/tmp/${stem}_kk.log
@@ -76,7 +98,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -398,21 +420,12 @@ kk)
 
 soapbasis)
   leg "the exported SOAP basis orthonormalises and is counted right"
-  LIB=../lib/madlib
-  if [ ! -f "$LIB/libmadlib.a" ]; then
-    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
-  elif ! command -v gfortran >/dev/null; then
-    echo "    SKIP: no gfortran"
-  else
-    if gfortran -O2 -I "$LIB" soapbasisverify.f90 -o /tmp/mad_soapbasis \
-         "$LIB/libmadlib.a" -llapack -lblas 2>/tmp/mad_soapbasis.log; then
-      if /tmp/mad_soapbasis; then ok "W, S, skip and multiplicity are what they claim"
-      else bad "the exported basis is wrong"; fi
-    else
-      sed 's/^/     /' /tmp/mad_soapbasis.log | tail -5
-      bad "soapbasisverify did not build"
-    fi
-  fi
+  fortran_check soapbasisverify "W, S, skip and multiplicity are what they claim"
+  ;;
+
+soapdesc)
+  leg "the exported SOAP descriptor is the one the energy is built from"
+  fortran_check soapdescverify "the descriptor reproduces the sparse-GP prediction"
   ;;
 
 pairmpi)

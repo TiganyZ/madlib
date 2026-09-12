@@ -116,25 +116,8 @@ contains
       bas = c_to_f_string(basis)
       smode = c_to_f_string(scaling_mode)
 
-!     soap_turbo selects neighbours by species through a logical mask rather
-!     than by an index, and carries the central atom's species as a (possibly
-!     fractional) multiplicity, for alloy sites. Neither is needed here, so the
-!     mask is one-hot and the multiplicity is one.
-      allocate (mask(1:n_pairs, 1:n_species))
-      mask = .false.
-      do k = 1, n_pairs
-         s = species_idx(k)
-         if (s >= 1 .and. s <= n_species) mask(k, s) = .true.
-      end do
-
-      allocate (species(1:1, 1:n_sites))
-      allocate (species_multiplicity(1:n_sites))
-      species_multiplicity = 1
-      k = 1
-      do s = 1, n_sites
-         species(1, s) = species_idx(k)
-         k = k + n_neigh(s)
-      end do
+      call build_species_mask(n_sites, n_pairs, n_species, n_neigh, species_idx, &
+                              mask, species, species_multiplicity)
 
       allocate (soap(1:dim, 1:n_sites))
       if (do_der) then
@@ -285,6 +268,128 @@ contains
       end do
       n_mult = counter2
    end subroutine madlib_soap_basis
+
+!  soap_turbo selects neighbours by species through a logical mask rather than
+!  by an index, and carries the central atom's species as a (possibly
+!  fractional) multiplicity, for alloy sites. Neither is needed here, so the
+!  mask is one-hot and the multiplicity is one.
+!
+!  Shared by madlib_local_property and madlib_soap_descriptor so the two cannot
+!  disagree about what a site's species is -- they are compared against each
+!  other, and a common error would cancel.
+   subroutine build_species_mask(n_sites, n_pairs, n_species, n_neigh, species_idx, &
+                                 mask, species, species_multiplicity)
+      integer, intent(in) :: n_sites, n_pairs, n_species
+      integer(c_int), intent(in) :: n_neigh(*), species_idx(*)
+      logical, allocatable, intent(out) :: mask(:, :)
+      integer, allocatable, intent(out) :: species(:, :)
+      integer, allocatable, intent(out) :: species_multiplicity(:)
+
+      integer :: k, s
+
+      allocate (mask(1:n_pairs, 1:n_species))
+      mask = .false.
+      do k = 1, n_pairs
+         s = species_idx(k)
+         if (s >= 1 .and. s <= n_species) mask(k, s) = .true.
+      end do
+
+      allocate (species(1:1, 1:n_sites))
+      allocate (species_multiplicity(1:n_sites))
+      species_multiplicity = 1
+      k = 1
+      do s = 1, n_sites
+         species(1, s) = species_idx(k)
+         k = k + n_neigh(s)
+      end do
+   end subroutine build_species_mask
+
+!  The SOAP descriptor itself, and optionally its Cartesian derivatives.
+!
+!  madlib_local_property runs get_soap and then predicts from it in one call,
+!  which leaves the descriptor unobservable. A device implementation has to be
+!  checked against it stage by stage, and comparing predicted energies only
+!  would let an error in the descriptor cancel against one in the prediction.
+!
+!  soap is (dim, n_sites) and soap_cart_der is (3, dim, n_pairs), both column
+!  major, both caller allocated. der may be a length-1 dummy when derivatives
+!  are not wanted.
+   subroutine madlib_soap_descriptor(n_sites, n_pairs, n_species, n_neigh, species_idx, &
+                                     rjs, thetas, phis, alpha_max, l_max, rcut_hard, rcut_soft, &
+                                     nf, global_scaling, atom_sigma_r, atom_sigma_r_scaling, &
+                                     atom_sigma_t, atom_sigma_t_scaling, amplitude_scaling, &
+                                     radial_enhancement, central_weight, basis, scaling_mode, &
+                                     compress, n_nonzero, p_i, p_j, p_el, dim, do_derivatives, &
+                                     soap_out, der_out) &
+      bind(c, name="madlib_soap_descriptor")
+
+      integer(c_int), value :: n_sites, n_pairs, n_species, l_max, radial_enhancement
+      integer(c_int), value :: compress, n_nonzero, dim, do_derivatives
+      integer(c_int), intent(in) :: n_neigh(*), species_idx(*), alpha_max(*), p_i(*), p_j(*)
+      real(c_double), intent(in) :: rjs(*), thetas(*), phis(*), p_el(*)
+      real(c_double), intent(in) :: rcut_hard(*), rcut_soft(*), nf(*), global_scaling(*)
+      real(c_double), intent(in) :: atom_sigma_r(*), atom_sigma_r_scaling(*)
+      real(c_double), intent(in) :: atom_sigma_t(*), atom_sigma_t_scaling(*)
+      real(c_double), intent(in) :: amplitude_scaling(*), central_weight(*)
+      character(kind=c_char), intent(in) :: basis(*), scaling_mode(*)
+      real(c_double), intent(out) :: soap_out(*), der_out(*)
+
+      real(dp), allocatable :: soap(:, :), soap_cart_der(:, :, :)
+      logical, allocatable :: mask(:, :)
+      integer, allocatable :: species(:, :), species_multiplicity(:)
+      integer :: i, j, k, n
+      logical :: do_der
+      character(len=32) :: bas, smode
+
+      do_der = (do_derivatives /= 0)
+      bas = c_to_f_string(basis)
+      smode = c_to_f_string(scaling_mode)
+
+      call build_species_mask(n_sites, n_pairs, n_species, n_neigh, species_idx, &
+                              mask, species, species_multiplicity)
+
+      allocate (soap(1:dim, 1:n_sites))
+      if (do_der) then
+         allocate (soap_cart_der(1:3, 1:dim, 1:n_pairs))
+      else
+         allocate (soap_cart_der(1:3, 1:dim, 1:1))
+      end if
+      soap = 0.d0
+      soap_cart_der = 0.d0
+
+      call get_soap(n_sites, n_neigh(1:n_sites), n_species, species, species_multiplicity, &
+                    n_pairs, mask, rjs(1:n_pairs), thetas(1:n_pairs), phis(1:n_pairs), &
+                    alpha_max(1:n_species), l_max, rcut_hard(1:n_species), rcut_soft(1:n_species), &
+                    nf(1:n_species), global_scaling(1:n_species), &
+                    atom_sigma_r(1:n_species), atom_sigma_r_scaling(1:n_species), &
+                    atom_sigma_t(1:n_species), atom_sigma_t_scaling(1:n_species), &
+                    amplitude_scaling(1:n_species), radial_enhancement, &
+                    central_weight(1:n_species), trim(bas), trim(smode), .false., &
+                    do_der, compress /= 0, n_nonzero, p_i(1:n_nonzero), p_j(1:n_nonzero), &
+                    p_el(1:n_nonzero), soap, soap_cart_der)
+
+      n = 0
+      do j = 1, n_sites
+         do i = 1, dim
+            n = n + 1
+            soap_out(n) = soap(i, j)
+         end do
+      end do
+
+      if (do_der) then
+         n = 0
+         do k = 1, n_pairs
+            do j = 1, dim
+               do i = 1, 3
+                  n = n + 1
+                  der_out(n) = soap_cart_der(i, j, k)
+               end do
+            end do
+         end do
+      end if
+
+      deallocate (soap, soap_cart_der, mask, species, species_multiplicity)
+   end subroutine madlib_soap_descriptor
 
    function c_to_f_string(s) result(f)
       character(kind=c_char), intent(in) :: s(*)
