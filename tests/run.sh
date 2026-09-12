@@ -114,7 +114,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu soappredict soapbatch ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -508,6 +508,45 @@ soappredict)
       $PYTHON compare_soap_predict.py /tmp/mad_pred_cpu.dat /tmp/mad_pred_gpu.dat
       if [ $? -eq 0 ]; then ok "device and host agree on energies and forces"
       else bad "the device prediction differs from the host's"; fi
+    fi
+  fi
+  ;;
+
+soapswap)
+  leg "the same call gives the same answer on either backend"
+  LIB=../lib/madlib
+  GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
+  if [ ! -f "$LIB/libmadlib.a" ]; then
+    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  elif [ ! -d "$GPUOBJ" ]; then
+    echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
+  else
+    # soaplocalpropdump.f90 contains no #ifdef. The host and device
+    # implementations export the same C symbol with the same arguments, so the
+    # build chooses, not the caller -- which is why pair_turbogap.cpp needs no
+    # change to get the device descriptor.
+    rm -f /tmp/mad_lp_cpu.dat /tmp/mad_lp_gpu.dat
+    sw_bad=0
+    gfortran -O2 -cpp -ffree-line-length-none -I "$LIB" soaplocalpropdump.f90 \
+        -o /tmp/mad_lp_cpu "$LIB/libmadlib.a" -llapack -lblas 2>/tmp/mad_sw.log \
+      && ${FC:-mpif90} -O2 -cpp -ffree-line-length-none -fallow-argument-mismatch \
+        -I "$GPUOBJ" soaplocalpropdump.f90 -o /tmp/mad_lp_gpu "$GPUOBJ"/*.o "$GPUOBJ"/cu/*.o \
+        -L"${CUDA_LIB:-/usr/local/cuda-13.4/lib64}" -lcudart -lcublas -lcuda -lstdc++ \
+        -llapack -lblas 2>>/tmp/mad_sw.log || sw_bad=1
+    if [ $sw_bad -ne 0 ]; then
+      sed 's/^/     /' /tmp/mad_sw.log | tail -6
+      bad "the two backends did not build"
+    else
+      # Both clamping and not: zero_trunc is where the device predictor is known
+      # to differ, which is why this path uses the host one on both sides.
+      for zt in 1 0; do
+        echo "    -- zero_trunc=$zt"
+        MADLIB_ZERO_TRUNC=$zt /tmp/mad_lp_cpu /tmp/mad_lp_cpu.dat >/dev/null 2>&1
+        MADLIB_ZERO_TRUNC=$zt /tmp/mad_lp_gpu /tmp/mad_lp_gpu.dat >/dev/null 2>&1
+        $PYTHON compare_soap_predict.py /tmp/mad_lp_cpu.dat /tmp/mad_lp_gpu.dat || sw_bad=1
+      done
+      if [ $sw_bad -eq 0 ]; then ok "madlib_local_property agrees on host and device"
+      else bad "the backends disagree"; fi
     fi
   fi
   ;;

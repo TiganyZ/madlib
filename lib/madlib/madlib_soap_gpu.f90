@@ -25,6 +25,7 @@ module madlib_soap_gpu
    use F_B_C
    use soap_turbo_desc, only: get_soap
    use gap, only: get_soap_energy_and_forces, soap_backend_begin, soap_backend_end
+   use local_prop, only: local_property_predict
    use types, only: soap_turbo
    use gpu_context, only: ctx_cublas_handle => cublas_handle, ctx_gpu_stream => gpu_stream
 
@@ -560,6 +561,80 @@ contains
       call release(buf)
       deallocate (soap, soap_cart_der)
    end subroutine one_batch
+
+!  A per-atom property with the descriptor computed on the device.
+!
+!  Same C symbol and same argument list as the host madlib_local_property, so a
+!  caller does not choose between them -- the build does. Exactly one of the two
+!  is compiled, which is forced anyway: the CPU and GPU soap_turbo share a
+!  module name and cannot both be linked.
+!
+!  The PREDICTION deliberately runs on the host, through the same
+!  local_property_predict the CPU path uses, even though gpu_local_property_predict
+!  exists. That routine takes no zero_trunc argument and does not clamp, while
+!  the host one floors negative values and zeroes their gradients. Core electron
+!  binding energies and Hirshfeld volumes both set zero_trunc, so the device
+!  predictor would quietly return different numbers for exactly the quantities
+!  this is for. The descriptor is the expensive part and it is on the device;
+!  the contraction that follows is not worth a silent change in physics.
+   subroutine madlib_local_property_gpu(n_sites, n_pairs, n_species, n_neigh, species_idx, &
+                                        rjs, thetas, phis, alpha_max, l_max, rcut_hard, &
+                                        rcut_soft, nf, global_scaling, atom_sigma_r, &
+                                        atom_sigma_r_scaling, atom_sigma_t, &
+                                        atom_sigma_t_scaling, amplitude_scaling, &
+                                        radial_enhancement, central_weight, basis, &
+                                        scaling_mode, compress, n_nonzero, p_i, p_j, p_el, &
+                                        dim, n_sparse, qs, alphas, v0, delta, zeta, &
+                                        zero_trunc, do_derivatives, v, v_der) &
+      bind(c, name="madlib_local_property")
+
+      integer(c_int), value :: n_sites, n_pairs, n_species, l_max, radial_enhancement
+      integer(c_int), value :: compress, n_nonzero, dim, n_sparse, zero_trunc, do_derivatives
+      integer(c_int), intent(in), target :: n_neigh(*), species_idx(*), alpha_max(*)
+      integer(c_int), intent(in), target :: p_i(*), p_j(*)
+      real(c_double), intent(in), target :: rjs(*), thetas(*), phis(*), p_el(*)
+      real(c_double), intent(in), target :: rcut_hard(*), rcut_soft(*), nf(*), global_scaling(*)
+      real(c_double), intent(in), target :: atom_sigma_r(*), atom_sigma_r_scaling(*)
+      real(c_double), intent(in), target :: atom_sigma_t(*), atom_sigma_t_scaling(*)
+      real(c_double), intent(in), target :: amplitude_scaling(*), central_weight(*)
+      character(kind=c_char), intent(in) :: basis(*), scaling_mode(*)
+      real(c_double), intent(in), target :: qs(*), alphas(*)
+      real(c_double), value :: v0, delta, zeta
+      real(c_double), intent(out), target :: v(*), v_der(*)
+
+      type(soap_buffers) :: buf
+      real(dp), allocatable, target :: soap(:, :), soap_cart_der(:, :, :)
+      real(dp), pointer :: der_p(:, :)
+      logical :: do_der
+
+      do_der = (do_derivatives /= 0)
+      call run_get_soap(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, phis, &
+                        alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
+                        atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, atom_sigma_t_scaling, &
+                        amplitude_scaling, radial_enhancement, central_weight, basis, &
+                        scaling_mode, compress, n_nonzero, p_j, dim, do_der, buf, soap, &
+                        soap_cart_der)
+
+      call cpy_dtoh_blocking(buf%soap_d, c_loc(soap), buf%st_soap)
+      if (do_der) call cpy_dtoh_blocking(buf%der_d, c_loc(soap_cart_der), buf%st_der)
+
+      ! dV/dr is one vector per PAIR, not per component: (3, n_pairs). The
+      ! descriptor derivative it comes from is (3, dim, n_pairs); the
+      ! contraction over dim happens inside local_property_predict.
+      if (do_der) then
+         call c_f_pointer(c_loc(v_der), der_p, [3, n_pairs])
+      else
+         call c_f_pointer(c_loc(v_der), der_p, [3, 1])
+      end if
+
+      call local_property_predict(soap, reshape(qs(1:dim*n_sparse), [dim, n_sparse]), &
+                                  alphas(1:n_sparse), v0, delta, zeta, v(1:n_sites), &
+                                  do_der, soap_cart_der, n_neigh(1:n_sites), der_p, &
+                                  zero_trunc=(zero_trunc /= 0))
+
+      call release(buf)
+      deallocate (soap, soap_cart_der)
+   end subroutine madlib_local_property_gpu
 
    subroutine upload(src, dst, nbytes)
       type(c_ptr), intent(in) :: src
