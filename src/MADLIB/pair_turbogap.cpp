@@ -413,7 +413,7 @@ void PairTurboGAP::add_soap_terms(int eflag)
       if (eflag_atom) eatom[sub_site[s]] += v[s];
     }
     if (report_terms && comm->me == 0)
-      fprintf(stderr, "  soap block central=%d ns=%d E=%.8f\n", b.central_species, ns, esum);
+      fprintf(stderr, "  soap block central=%d ns=%d E=%.17g\n", b.central_species, ns, esum);
     for (int p = 0; p < np; p++) {
       const int a = sub_jatom[p];
       f[a][0] -= v_der[3 * p];
@@ -434,28 +434,32 @@ void PairTurboGAP::add_soap_terms(int eflag)
    stands, so the per-site forces map straight onto local atoms.
 ------------------------------------------------------------------------- */
 
-void PairTurboGAP::add_pair_terms(int eflag)
+// A species name in the fixed-length form TurboGAP's routines compare against.
+// Blank padded, because Fortran compares the whole character*8.
+static std::string name8(const std::string &s)
+{
+  std::string buf(8, ' ');
+  for (size_t k = 0; k < s.size() && k < 8; k++) buf[k] = s[k];
+  return buf;
+}
+
+/* ----------------------------------------------------------------------
+   The 2b and core_pot terms.
+
+   Split from the 3b term so the Kokkos variant can replace these two and
+   inherit that one: TurboGAP has device kernels for both that take raw device
+   pointers and touch no vendor API, while its 3b kernel is a template carrying
+   a register cap with no Kokkos equivalent.
+
+   Fills site_energy, site_force and virial_term, which add_pair_terms
+   accumulates -- so a device implementation copies back into the same buffers
+   and the accumulation stays written once.
+------------------------------------------------------------------------- */
+
+void PairTurboGAP::add_2b_and_core(int ns, int np, int nall)
 {
 #ifdef MADLIB_TURBOGAP
-  double **f = atom->f;
-  const int ns = (int) nb.n_neigh.size();
-  const int np = (int) nb.rjs.size();
-  if (ns == 0) return;
-
   const int nsp = (int) pot.species_types.size();
-  const int nall = atom->nlocal + atom->nghost;
-  site_energy.assign(ns, 0.0);
-  // Over local AND ghost atoms: 3b puts a force on every atom of a triplet,
-  // and a ghost has to keep its own slot for reverse communication to find it.
-  site_force.assign(3 * nall, 0.0);
-  virial_term.assign(9, 0.0);
-
-  auto name8 = [&](const std::string &s) {
-    static thread_local std::string buf;
-    buf.assign(8, ' ');
-    for (size_t k = 0; k < s.size() && k < 8; k++) buf[k] = s[k];
-    return buf;
-  };
 
   for (const auto &b : pot.twob) {
     const std::string s1 = name8(b.species1), s2 = name8(b.species2);
@@ -465,43 +469,72 @@ void PairTurboGAP::add_pair_terms(int eflag)
                   s2.c_str(), species_buf.data(), 1, site_energy.data(), site_force.data(),
                   virial_term.data());
   }
+  report_term(ns, "2b", (int) pot.twob.size());
 
-  if (report_terms && comm->me == 0) {
-    double e2 = 0.0;
-    for (int s = 0; s < ns; s++) e2 += site_energy[s];
-    fprintf(stderr, "  after 2b: E=%.8f\n", e2);
-  }
-  for (const auto &b : pot.threeb) {
-    const std::string sc = name8(b.species_center), s1 = name8(b.species1), s2 = name8(b.species2);
-    std::string kern = b.kernel_type;
-    kern.resize(3, ' ');
-    madlib_gap_3b(ns, nall, np, nsp, b.n_sparse, b.dim, nb.rjs.data(), nb.xyz.data(), b.alphas.data(),
-                  b.cutoff.data(), b.rcut, b.buffer, b.delta, b.sigma.data(), b.e0, b.qs.data(),
-                  nb.n_neigh.data(), nb.neighbors_list.data(), nb.species.data(),
-                  nb.neighbor_species.data(), kern.c_str(), sc.c_str(), s1.c_str(), s2.c_str(),
-                  species_buf.data(), 1, site_energy.data(), site_force.data(),
-                  virial_term.data());
-  }
-
-  if (report_terms && comm->me == 0) {
-    double e3 = 0.0;
-    for (int s = 0; s < ns; s++) e3 += site_energy[s];
-    fprintf(stderr, "  after 3b: E=%.8f\n", e3);
-  }
   for (const auto &b : pot.core) {
     const std::string s1 = name8(b.species1), s2 = name8(b.species2);
-    madlib_gap_core_pot(ns, nall, np, nsp, (int) b.x.size(), nb.rjs.data(), nb.xyz.data(), b.x.data(),
-                        b.V.data(), b.yp1, b.ypn, b.dVdx2.data(), nb.n_neigh.data(),
+    madlib_gap_core_pot(ns, nall, np, nsp, (int) b.x.size(), nb.rjs.data(), nb.xyz.data(),
+                        b.x.data(), b.V.data(), b.yp1, b.ypn, b.dVdx2.data(), nb.n_neigh.data(),
                         nb.species.data(), nb.neighbor_species.data(), s1.c_str(), s2.c_str(),
                         species_buf.data(), 1, site_energy.data(), site_force.data(),
                         virial_term.data());
   }
 
-  if (report_terms && comm->me == 0) {
-    double ec = 0.0;
-    for (int s = 0; s < ns; s++) ec += site_energy[s];
-    fprintf(stderr, "  after core_pot: E=%.8f\n", ec);
+  report_term(ns, "core_pot", (int) pot.core.size());
+#endif
+}
+
+void PairTurboGAP::report_term(int ns, const char *what, int nblocks)
+{
+  if (!report_terms || comm->me != 0) return;
+  double e = 0.0;
+  for (int s = 0; s < ns; s++) e += site_energy[s];
+  fprintf(stderr, "  after %s: blocks=%d E=%.17g\n", what, nblocks, e);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairTurboGAP::add_3b(int ns, int np, int nall)
+{
+#ifdef MADLIB_TURBOGAP
+  const int nsp = (int) pot.species_types.size();
+
+  for (const auto &b : pot.threeb) {
+    const std::string sc = name8(b.species_center), s1 = name8(b.species1), s2 = name8(b.species2);
+    std::string kern = b.kernel_type;
+    kern.resize(3, ' ');
+    madlib_gap_3b(ns, nall, np, nsp, b.n_sparse, b.dim, nb.rjs.data(), nb.xyz.data(),
+                  b.alphas.data(), b.cutoff.data(), b.rcut, b.buffer, b.delta, b.sigma.data(),
+                  b.e0, b.qs.data(), nb.n_neigh.data(), nb.neighbors_list.data(),
+                  nb.species.data(), nb.neighbor_species.data(), kern.c_str(), sc.c_str(),
+                  s1.c_str(), s2.c_str(), species_buf.data(), 1, site_energy.data(),
+                  site_force.data(), virial_term.data());
   }
+
+  report_term(ns, "3b", (int) pot.threeb.size());
+#endif
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairTurboGAP::add_pair_terms(int eflag)
+{
+#ifdef MADLIB_TURBOGAP
+  double **f = atom->f;
+  const int ns = (int) nb.n_neigh.size();
+  const int np = (int) nb.rjs.size();
+  if (ns == 0) return;
+
+  const int nall = atom->nlocal + atom->nghost;
+  site_energy.assign(ns, 0.0);
+  // Over local AND ghost atoms: 3b puts a force on every atom of a triplet,
+  // and a ghost has to keep its own slot for reverse communication to find it.
+  site_force.assign(3 * nall, 0.0);
+  virial_term.assign(9, 0.0);
+
+  add_2b_and_core(ns, np, nall);
+  add_3b(ns, np, nall);
+
   for (int s = 0; s < ns; s++) {
     // e0 is a per-atom offset, not a term: TurboGAP folds it into the soap
     // energies, and its own trajectory header reports energy_soap WITHOUT it,

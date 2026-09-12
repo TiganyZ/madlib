@@ -30,10 +30,41 @@ XYZ=/home/tigany/test/turbogap_tests/xrd_mad/atoms.xyz
 # them skip when they are absent.
 DATA_ROOT=${MADLIB_DATA_ROOT:-$HOME/test/turbogap_tests}
 GAP_DIR=$DATA_ROOT/xrd_mad/gap_files
+# -e is false for a dangling symlink, and plain ln then fails against the name
+# that is already there -- which leaves the broken link in place and every gap
+# leg failing on a missing file. Replace it.
+if [ -L data/gap_files ] && [ ! -d data/gap_files ]; then rm -f data/gap_files; fi
 if [ -d "$GAP_DIR" ] && [ ! -e data/gap_files ]; then ln -s "$GAP_DIR" data/gap_files; fi
 fail=0
 
 have() { [ -e "$1" ]; }
+
+# One host/device comparison. $1 label, $2 host input, $3 kk input, $4 dump
+# stem. Both dumps are removed first: a run that dies leaves the previous
+# run's dump in place, and comparing those two reports whatever agreement the
+# last good pair happened to have.
+compare_kk() {
+  local label=$1 hin=$2 kin=$3 stem=$4
+  local hlog=/tmp/${stem}_host.log klog=/tmp/${stem}_kk.log
+  local hrc=0 krc=0
+  rm -f "${stem}.dump" "${stem}_kk.dump"
+  TURBOGAP_TERMS=1 $LMP -in "$hin" -log none >"$hlog" 2>&1 || hrc=$?
+  TURBOGAP_TERMS=1 TURBOGAP_CHECK_NEIGH=1 $LMP -k on g 1 -sf kk -in "$kin" \
+      -log none >"$klog" 2>&1 || krc=$?
+  echo "    -- $label"
+  if [ $hrc -ne 0 ] || [ $krc -ne 0 ]; then
+    echo "    host rc=$hrc  kk rc=$krc"
+    grep -ih "error" "$hlog" "$klog" | head -4 | sed 's/^/     /'
+    bad "$label: a run did not complete"
+    return
+  fi
+  grep -E "sites, .* pairs|inconsistent" "$klog" | sed 's/^/     /'
+  if $PYTHON compare_pair_kk.py "${stem}.dump" "${stem}_kk.dump" "$hlog" "$klog"; then
+    ok "$label"
+  else
+    bad "$label"
+  fi
+}
 
 leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
@@ -354,15 +385,10 @@ kk)
   if ! $LMP -h 2>/dev/null | grep -q "turbogap/kk"; then
     echo "    SKIP: built without the KOKKOS package"
   else
-    $LMP -in in.pair_turbogap -log none >/tmp/pair_tg.log 2>&1
-    TURBOGAP_CHECK_NEIGH=1 $LMP -k on g 1 -sf kk -in in.pair_turbogap_kk \
-        -log none >/tmp/pair_tg_kk.log 2>&1
-    grep -E "sites, .* pairs|inconsistent" /tmp/pair_tg_kk.log | sed 's/^/     /'
-    $PYTHON compare_pair_kk.py
-    if [ $? -eq 0 ]; then ok "the device neighbour build changes no answer"
-    else bad "turbogap/kk disagrees with turbogap"; fi
+    compare_kk "glassy carbon, 91 atoms" in.pair_turbogap in.pair_turbogap_kk pair_turbogap
+    compare_kk "core_pot probe, 3 close pairs" in.core_probe in.core_probe_kk core_probe
   fi
-;;
+  ;;
 
 pair)
   leg "a whole TurboGAP potential as pair_style turbogap"

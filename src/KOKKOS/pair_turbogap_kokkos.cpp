@@ -19,14 +19,19 @@
 
 #include "atom_kokkos.h"
 #include "atom_masks.h"
+#include "comm.h"
 #include "error.h"
 #include "force.h"
 #include "memory_kokkos.h"
 #include "neigh_list_kokkos.h"
 #include "neigh_request.h"
+
+// The lifted TurboGAP device kernels; see lib/madlib/turbogap_gpu.
+#include "gap_gpu.h"
 #include "neighbor.h"
 
 #include <cstdlib>
+#include <type_traits>
 #include <cstring>
 
 using namespace LAMMPS_NS;
@@ -183,6 +188,149 @@ template <class DeviceType> void PairTurboGAPKokkos<DeviceType>::compute(int efl
 }
 
 /* ---------------------------------------------------------------------- */
+
+
+
+/* ----------------------------------------------------------------------
+   The sparse sets, uploaded once.
+------------------------------------------------------------------------- */
+
+template <class DeviceType> void PairTurboGAPKokkos<DeviceType>::upload_potential()
+{
+  if (uploaded) return;
+  uploaded = 1;
+
+  // The device kernels take species as INDICES, not names: the host routines
+  // are handed a character*8 table and resolve the names themselves, which is
+  // a thing a kernel cannot do. Resolved here, once, against the same ordered
+  // list pair_coeff fixed -- so an unknown name is a hard error now rather
+  // than a term that silently never fires.
+  auto index_of = [&](const std::string &name) {
+    for (size_t k = 0; k < pot.species_types.size(); k++)
+      if (pot.species_types[k] == name) return (int) k + 1;
+    error->all(FLERR, "pair_style turbogap/kk: species {} is not one pair_coeff named", name);
+    return 0;
+  };
+
+  auto upload = [](const std::vector<double> &h, const std::string &label) {
+    Kokkos::View<double *, DeviceType> d(label, h.size() ? h.size() : 1);
+    auto m = Kokkos::create_mirror_view(d);
+    for (size_t i = 0; i < h.size(); i++) m(i) = h[i];
+    Kokkos::deep_copy(d, m);
+    return d;
+  };
+
+  for (const auto &b : pot.twob) {
+    DeviceTwoB t;
+    t.alphas = upload(b.alphas, "madkk:2b_alphas");
+    t.cutoff = upload(b.cutoff, "madkk:2b_cutoff");
+    t.qs = upload(b.qs, "madkk:2b_qs");
+    t.sp1 = index_of(b.species1);
+    t.sp2 = index_of(b.species2);
+    d_twob.push_back(t);
+  }
+  for (const auto &b : pot.core) {
+    DeviceCore c;
+    c.x = upload(b.x, "madkk:core_x");
+    c.V = upload(b.V, "madkk:core_V");
+    c.dVdx2 = upload(b.dVdx2, "madkk:core_dVdx2");
+    c.sp1 = index_of(b.species1);
+    c.sp2 = index_of(b.species2);
+    d_core.push_back(c);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   The 2b and core_pot terms, on the device.
+------------------------------------------------------------------------- */
+
+template <class DeviceType>
+void PairTurboGAPKokkos<DeviceType>::add_2b_and_core(int ns, int np, int nall)
+{
+  // The lifted kernels dispatch on Kokkos::DefaultExecutionSpace, which is the
+  // device space on a GPU build. turbogap/kk/host instantiates this with
+  // LMPHostType, whose views live in host memory -- handing those to a device
+  // kernel is an illegal access, not a slow path. So the host instantiation
+  // keeps the host terms.
+  //
+  // The two are the same type on a host-only Kokkos build, where this is
+  // simply never taken.
+  if constexpr (!std::is_same_v<DeviceType, Kokkos::DefaultExecutionSpace>) {
+    PairTurboGAP::add_2b_and_core(ns, np, nall);
+    return;
+  } else {
+
+  upload_potential();
+
+  if ((int) d_energies.extent(0) < ns)
+    d_energies = Kokkos::View<double *, DeviceType>("madkk:energies", ns);
+  if ((int) d_forces.extent(0) < 3 * nall)
+    d_forces = Kokkos::View<double *, DeviceType>("madkk:forces", 3 * nall);
+  if (d_virial.extent(0) < 9) d_virial = Kokkos::View<double *, DeviceType>("madkk:virial", 9);
+
+  Kokkos::deep_copy(d_energies, 0.0);
+  Kokkos::deep_copy(d_forces, 0.0);
+  Kokkos::deep_copy(d_virial, 0.0);
+
+  // i_beg = 1, i_end = ns. TurboGAP's kernels index i_site = i_beg - 1 + tid
+  // over i_end - i_beg + 1 threads, so this is sites 0 .. ns-1 -- the same
+  // identity between site and local atom the host path keeps.
+  for (const auto &t : d_twob) {
+    const auto &b = pot.twob[&t - &d_twob[0]];
+    gpu_get_2b_forces_energies(1, ns, b.n_sparse, d_energies.data(), b.e0, nbk.d_n_neigh.data(),
+                               true, d_forces.data(), d_virial.data(), nbk.d_rjs.data(), b.rcut,
+                               nbk.d_species.data(), nbk.d_neighbor_species.data(), t.sp1, t.sp2,
+                               b.buffer, b.delta, t.cutoff.data(), t.qs.data(), b.sigma,
+                               t.alphas.data(), nbk.d_xyz.data(), nullptr);
+  }
+
+  report_device_term(ns, "2b", (int) d_twob.size());
+
+  for (const auto &c : d_core) {
+    const auto &b = pot.core[&c - &d_core[0]];
+    gpu_get_core_pot_energy_and_forces(1, ns, true, nbk.d_species.data(), c.sp1, c.sp2,
+                                       nbk.d_n_neigh.data(), nbk.d_neighbor_species.data(),
+                                       nbk.d_rjs.data(), (int) b.x.size(), c.x.data(), c.V.data(),
+                                       c.dVdx2.data(), b.yp1, b.ypn, nbk.d_xyz.data(),
+                                       d_forces.data(), d_virial.data(), d_energies.data(),
+                                       nullptr);
+  }
+  report_device_term(ns, "core_pot", (int) d_core.size());
+  Kokkos::fence();
+
+  // Back into the buffers add_pair_terms accumulates, so the host 3b term adds
+  // on top and the accumulation is still written once.
+  {
+    auto me = Kokkos::create_mirror_view(d_energies);
+    auto mf = Kokkos::create_mirror_view(d_forces);
+    Kokkos::deep_copy(me, d_energies);
+    Kokkos::deep_copy(mf, d_forces);
+    for (int s = 0; s < ns; s++) site_energy[s] += me(s);
+    for (int a = 0; a < 3 * nall; a++) site_force[a] += mf(a);
+  }
+
+  (void) np;
+  }
+}
+
+/* ----------------------------------------------------------------------
+   The running device-side energy after one term. Reduced on the device
+   rather than copied back, so the production path still copies once.
+------------------------------------------------------------------------- */
+
+template <class DeviceType>
+void PairTurboGAPKokkos<DeviceType>::report_device_term(int ns, const char *what, int nblocks)
+{
+  if (!report_terms || comm->me != 0) return;
+  auto d_e = d_energies;
+  double e = 0.0;
+  Kokkos::parallel_reduce(
+      "madkk:term_sum", Kokkos::RangePolicy<DeviceType>(0, ns),
+      KOKKOS_LAMBDA(const int s, double &acc) { acc += d_e(s); }, e);
+  Kokkos::fence();
+  fprintf(stderr, "  after %s (device): blocks=%d E=%.17g\n", what, nblocks, e);
+}
+
 
 namespace LAMMPS_NS {
 template class PairTurboGAPKokkos<LMPDeviceType>;

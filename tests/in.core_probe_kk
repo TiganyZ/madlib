@@ -1,0 +1,18 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# core_pot on its own, through pair_style turbogap/kk. See
+# data/core_probe.data for why the glassy-carbon cell cannot check this term.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/core_probe.data
+mass            1 12.011
+mass            2 15.999
+
+pair_style      turbogap/kk e0 C -.16138053 e0 O 0.0
+pair_coeff      * * data/gap_files/CO.gap C O
+
+dump d all custom 1 core_probe_kk.dump id fx fy fz
+dump_modify d format float %.12f sort id
+thermo_style    custom step pe
+run 0

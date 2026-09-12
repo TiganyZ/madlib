@@ -18,7 +18,8 @@ import sys
 # own arrangement -- every Kokkos style sits beside the package's Kokkos
 # machinery rather than with its host counterpart -- and it is also what makes
 # them build only when PKG_KOKKOS is on, without a conditional anywhere.
-KOKKOS_FILES = ["pair_turbogap_kokkos.h", "pair_turbogap_kokkos.cpp", "mad_neigh_kokkos.h"]
+KOKKOS_FILES = ["pair_turbogap_kokkos.h", "pair_turbogap_kokkos.cpp", "mad_neigh_kokkos.h",
+                "mad_gap_2b_kokkos.cpp"]
 
 PAIR_STYLES = [("turbogap", "pair_turbogap"), ("turbogap/kk", "pair_turbogap_kokkos")]
 

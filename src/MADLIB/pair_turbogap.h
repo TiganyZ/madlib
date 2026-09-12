@@ -141,6 +141,22 @@ class PairTurboGAP : public Pair {
   void pack_species_table();
   void add_soap_terms(int eflag);
   void add_pair_terms(int eflag);
+
+  // Split so the Kokkos variant can replace one and inherit the other.
+  // TurboGAP has device kernels for 2b and core_pot that take raw device
+  // pointers and use no vendor API, so those move first; 3b's device kernel
+  // is a template carrying a register cap and stays on the host for now.
+  //
+  // Both fill site_energy, site_force and virial_term, which add_pair_terms
+  // then accumulates -- so a device implementation copies back into the same
+  // buffers and the accumulation is written once.
+  virtual void add_2b_and_core(int ns, int np, int nall);
+  void add_3b(int ns, int np, int nall);
+
+  // The running site-energy sum after one term, under TURBOGAP_TERMS. nblocks
+  // travels with it because a term with no blocks contributes nothing, and a
+  // comparison against it would agree for that reason alone.
+  void report_term(int ns, const char *what, int nblocks);
 };
 
 }    // namespace LAMMPS_NS

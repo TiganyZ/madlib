@@ -213,13 +213,44 @@ Stage 1 is the right first step: it is small, it is the first genuinely
 Kokkos-native kernel in this code, and it is checkable on its own against
 something that already works.
 
-Two things the CPU style settled that carry straight over. The virial comes
-from `virial_fdotr_compute()` rather than TurboGAP's own accumulator, whose
-sign and factor would be easy to get wrong by two without looking wrong. And
-the forces are deterministic because `gpu_scatter.cu` sums them in an order
-fixed by the neighbour list rather than by the scheduler -- which a pair style
-inherits for free, and which matters more in LAMMPS than in TurboGAP because
-LAMMPS users diff trajectories.
+One thing the CPU style settled carries straight over: the virial comes from
+`virial_fdotr_compute()` rather than TurboGAP's own accumulator, whose sign and
+factor would be easy to get wrong by two without looking wrong.
+
+A second thing written here earlier was wrong, and stage 2 measured it. It said
+the forces were deterministic because `gpu_scatter.cu` orders its sums by the
+neighbour list rather than by the scheduler. The lifted 2b kernel does not go
+through `gpu_scatter`; it `atomic_add`s, and four consecutive runs of the
+91-atom cell gave four different force dumps. The same input reproduces itself
+only at 12 pairs, where nothing collides. So `turbogap/kk` inherits TurboGAP's
+run-to-run device non-reproducibility, and a LAMMPS user diffing two GPU
+trajectories will see them separate. That is worth stating in the style's own
+documentation before anyone runs one.
+
+### What stage 2 settled
+
+`gap_2b.cu` is lifted **verbatim** -- byte-identical to TurboGAP master, checked
+by `md5sum` -- behind three shim headers (123 lines) that supply `hipStream_t`,
+`TG_LAMBDA`, `TG_INLINE_FUNCTION` and `tg_parallel_for` on LAMMPS's Kokkos. No
+hop, no hipBLAS, no second device runtime. That is option 3 of section 4
+applied at one point of use.
+
+Both device terms match the host, on two configurations:
+
+| | 2b | core_pot | forces |
+| --- | --- | --- | --- |
+| glassy carbon, 91 atoms | 2.0e-11 | (zero) | 1.7e-09 |
+| core_pot probe, 12 pairs | 2.9e-12 | 1.3e-12 | 7.8e-14 |
+
+The second configuration exists because the first cannot check `core_pot` at
+all: the term is defined on r in [0.05, 1.0] A and is identically zero beyond
+it, so it contributes exactly nothing to any equilibrated structure. Deleting
+the device `core_pot` loop outright still passed every check until
+`tests/data/core_probe.data` put three pairs at 0.65-0.85 A. With it, the same
+deletion fails at 5.5e-01 on the term and 68 eV on the energy. Two things had
+to change before that was visible: the terms are reported separately rather
+than as one sum, and at `%.17g` rather than `%.8f`, which was coarser than the
+tolerance it was being compared against.
 
 ## 6. Toolchain notes for `alt`
 
