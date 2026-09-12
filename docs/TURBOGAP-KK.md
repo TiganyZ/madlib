@@ -364,6 +364,45 @@ not defined. So stage 4 is: **turn `_GPU` on for the vendored Fortran and give
 it a handle and a stream**, rather than re-deriving 2700 lines of kernels in
 C++. The device pointers it wants are what `view.data()` already returns.
 
+### The gate, measured -- and two warnings in this document were wrong
+
+`tools/check_gpu_gate.sh` compiles TurboGAP's device layer with LAMMPS's own
+include list, compiler and flags. **All nine files compile unmodified**, at
+C++20 under CUDA 13.4 with `-D_KOKKOS`:
+
+    gap_soap_radial   gap_soap_angular   gap_soap_descriptor
+    gap_soap_forces   gap_soap_radial_operator
+    gpu_blas          gpu_scatter        gpu_scan            gap_predict
+
+Two claims made earlier in this file do not survive that measurement.
+
+**"hop means a second vendor runtime beside Kokkos."** It does not. hop is
+**header-only** -- 45 headers and some Python tooling, no library at all -- and
+is pure `#define` remapping: `hipDeviceSynchronize` to `gpuDeviceSynchronize`
+to `cudaDeviceSynchronize`. Putting it on the include path costs nothing at
+runtime. `nm` over the nine objects finds **zero** `hip*` or `rocblas*` symbols;
+hop resolved every one to CUDA.
+
+**"hipBLAS is a dependency LAMMPS otherwise does not have."** On CUDA it
+resolves to cuBLAS, which ships with the toolkit LAMMPS already links under
+`PKG_KOKKOS` + CUDA. The whole new link surface is five symbols:
+`cublasCreate_v2`, `cublasDestroy_v2`, `cublasDgemm_v2`, `cublasDgemv_v2`,
+`cublasSetStream_v2`.
+
+So the vendor-surface problem that shaped section 4 is smaller than it looked.
+The 68 hop headers are an **include path**, not a vendor drop, and the ROCm
+spelling keeps working for free -- which is the portability answer section 4
+was reaching for.
+
+It also means the hand-written shim headers in `lib/madlib/turbogap_gpu/` are
+not needed for the SOAP work. They earned their place for `gap_2b.cu`, which
+calls no vendor API and so needed no hop, but the SOAP files should use
+TurboGAP's real `gpu_common.h` rather than a second copy that can drift.
+
+What is left is the part that was always the real work: there is no C++ compute
+entry point and no C++ `.gap` reader, so the orchestration has to be written.
+Compiling was never the hard part; it just had to be ruled out first.
+
 Three things to settle when it is done:
 
 - **The BLAS handle.** `cublas_handle` is created by `create_cublas_handle` in
