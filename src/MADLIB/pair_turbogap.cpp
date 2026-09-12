@@ -561,6 +561,20 @@ void PairTurboGAP::compute(int eflag, int vflag)
 #else
   ev_init(eflag, vflag);
 
+  // Verlet::force_clear() zeroes the ghost range of f only when newton is on.
+  // With it off this style's own ghost forces from the previous step are still
+  // sitting there, and the fold below would add them a second time -- right on
+  // the first step, when the array is still fresh, and wrong on every step
+  // after. Nothing else writes ghost forces with newton off, because the
+  // LAMMPS convention is that a full-list style applies force only to the
+  // local atom; this one cannot, since TurboGAP returns de_i/dr_j for every
+  // neighbour j of a site.
+  if (!force->newton_pair) {
+    const int nlocal = atom->nlocal;
+    const int nghost = atom->nghost;
+    if (nghost) memset(&atom->f[nlocal][0], 0, 3 * nghost * sizeof(double));
+  }
+
   build_neighbours();
   add_soap_terms(eflag);
   add_pair_terms(eflag);

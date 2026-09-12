@@ -1,0 +1,20 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# Five steps of NVE. The point is the steps: a stale-ghost-force bug is exact
+# at step 0 and wrong from step 1, so run 0 cannot see it. See the md leg in
+# run.sh.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            1 12.011
+mass            2 15.999
+pair_style      turbogap e0 C -.16138053 e0 O 0.0
+pair_coeff      * * data/gap_files/CO.gap C O
+velocity        all create 300.0 12345
+fix             1 all nve
+dump d all custom 5 md_ref.dump id fx fy fz
+dump_modify d format float %.12f sort id
+thermo          5
+thermo_style    custom step pe
+run 5

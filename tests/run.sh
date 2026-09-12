@@ -70,7 +70,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -387,6 +387,24 @@ kk)
   else
     compare_kk "glassy carbon, 91 atoms" in.pair_turbogap in.pair_turbogap_kk pair_turbogap
     compare_kk "core_pot probe, 3 close pairs" in.core_probe in.core_probe_kk core_probe
+  fi
+  ;;
+
+pairmd)
+  leg "the pair styles agree after five MD steps, not just at run 0"
+  L=/tmp/madlib_md
+  rm -f md_ref.dump md_noff.dump md_kk.dump
+  $LMP -in in.md_ref  -log none >${L}_ref.log  2>&1
+  $LMP -in in.md_noff -log none >${L}_noff.log 2>&1
+  args="newton_off md_noff.dump ${L}_noff.log"
+  if $LMP -h 2>/dev/null | grep -q "turbogap/kk"; then
+    $LMP -k on g 1 -sf kk -in in.md_kk -log none >${L}_kk.log 2>&1
+    args="$args turbogap/kk md_kk.dump ${L}_kk.log"
+  fi
+  if $PYTHON compare_pair_md.py md_ref.dump ${L}_ref.log $args; then
+    ok "five steps of NVE agree with newton on"
+  else
+    bad "the styles diverge under MD"
   fi
   ;;
 
