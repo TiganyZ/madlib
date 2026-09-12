@@ -114,7 +114,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu soappredict ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu soappredict soapbatch ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -509,6 +509,42 @@ soappredict)
       if [ $? -eq 0 ]; then ok "device and host agree on energies and forces"
       else bad "the device prediction differs from the host's"; fi
     fi
+  fi
+  ;;
+
+soapbatch)
+  leg "splitting SOAP into batches changes no answer"
+  LIB=../lib/madlib
+  GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
+  if [ ! -f "$LIB/libmadlib.a" ]; then
+    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  elif [ ! -d "$GPUOBJ" ]; then
+    echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
+  elif ! build_cpu_and_gpu soappredictdump /tmp/mad_bat_cpu /tmp/mad_bat_gpu; then
+    sed 's/^/     /' /tmp/mad_gpubuild.log | tail -6
+    bad "the batching binaries did not build"
+  else
+    /tmp/mad_bat_cpu /tmp/mad_bat_cpu.dat >/dev/null 2>&1
+    bat_bad=0
+    # Budgets chosen to give one batch and then several. The reported count is
+    # checked, because "many batches agree" proves nothing if the budget was
+    # silently ignored and one batch ran each time.
+    for budget in 0 700000 100000; do
+      n=$(MADLIB_SOAP_BATCH_REPORT=1 MADLIB_MAX_BYTES=$budget /tmp/mad_bat_gpu \
+            /tmp/mad_bat_gpu.dat 2>&1 >/dev/null | sed -n 's/.*soap batches: \([0-9]*\).*/\1/p')
+      echo "    -- budget ${budget:-0}: $n batch(es)"
+      [ -n "$n" ] || { bad_any=1; bat_bad=1; continue; }
+      $PYTHON compare_soap_predict.py /tmp/mad_bat_cpu.dat /tmp/mad_bat_gpu.dat || bat_bad=1
+      echo "$n" >> /tmp/mad_bat_counts
+    done
+    # The split has to have actually happened at least once.
+    if [ "$(sort -u /tmp/mad_bat_counts | wc -l)" -lt 2 ]; then
+      echo "    every budget gave the same batch count -- the split was not exercised"
+      bat_bad=1
+    fi
+    rm -f /tmp/mad_bat_counts
+    if [ $bat_bad -eq 0 ]; then ok "batched and unbatched agree, and the split happened"
+    else bad "batching changes the answer"; fi
   fi
   ;;
 

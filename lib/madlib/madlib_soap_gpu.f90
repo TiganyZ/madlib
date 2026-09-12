@@ -93,6 +93,102 @@ contains
       recompute_basis = .true.
    end subroutine madlib_soap_gpu_reset
 
+!  What one SOAP batch costs, per pair and per site.
+!
+!  Restated from neighbors.f90's soap_batch_memory_model (the _GPU branch, which
+!  differs from the CPU one -- the device holds more per pair). Restated rather
+!  than called because that routine lives in a module this does not otherwise
+!  need, and the formula is six terms. If it drifts upstream, soapbatchverify
+!  is what notices: it checks the split against the real allocation.
+   subroutine batch_memory_model(l_max, n_max, n_soap, n_species, bytes_per_pair, bytes_per_site)
+      integer, intent(in) :: l_max
+      integer, intent(in) :: n_max
+      integer, intent(in) :: n_soap
+      integer, intent(in) :: n_species
+      real(dp), intent(out) :: bytes_per_pair
+      real(dp), intent(out) :: bytes_per_site
+
+      integer :: k_max
+
+      k_max = 1 + l_max*(l_max + 1)/2 + l_max
+
+      bytes_per_pair = 48.d0*dfloat(k_max)*dfloat(n_max) &
+                       + 64.d0*dfloat(k_max) &
+                       + 72.d0*dfloat(n_soap) &
+                       + 40.d0*dfloat(n_max) &
+                       + 8.d0*dfloat(n_species) &
+                       + 88.d0
+
+      bytes_per_site = 16.d0*dfloat(k_max)*dfloat(n_max) &
+                       + 16.d0*dfloat(n_soap) &
+                       + 24.d0
+   end subroutine batch_memory_model
+
+!  How many batches this configuration needs to fit in max_bytes, and where the
+!  site boundaries fall.
+!
+!  Boundaries are chosen so each batch holds roughly the same number of PAIRS,
+!  not the same number of sites: the cost is dominated by pairs and a site with
+!  many neighbours costs many times one with few. Sites stay contiguous and in
+!  order, which is what lets a batch's energies slot straight back into the
+!  caller's array.
+!
+!  This is the loop at turbogap.f90:1792, which is in the driver rather than in
+!  anything callable -- so an external caller reimplements it. TurboGAP takes
+!  the batch count from a keyword on the GPU path; here it is derived from a
+!  byte budget, because a LAMMPS user has no keyword to set and the number of
+!  atoms on a rank is not theirs to choose.
+   subroutine plan_batches(n_sites, n_pairs, n_neigh, l_max, n_max, n_soap, n_species, &
+                           max_bytes, n_chunks, i_beg, i_end, j_beg, j_end)
+      integer, intent(in) :: n_sites, n_pairs, l_max, n_max, n_soap, n_species
+      integer(c_int), intent(in) :: n_neigh(*)
+      integer(c_size_t), intent(in) :: max_bytes
+      integer, intent(out) :: n_chunks
+      integer, allocatable, intent(out) :: i_beg(:), i_end(:), j_beg(:), j_end(:)
+
+      real(dp), parameter :: SAFETY = 1.10d0
+      real(dp) :: bytes_per_pair, bytes_per_site, need, pairs_per_chunk
+      integer :: i, k, k2, chunk
+
+      call batch_memory_model(l_max, n_max, n_soap, n_species, bytes_per_pair, bytes_per_site)
+      need = SAFETY*(dfloat(n_pairs)*bytes_per_pair + dfloat(n_sites)*bytes_per_site)
+
+      if (max_bytes <= 0_c_size_t) then
+         n_chunks = 1
+      else
+         n_chunks = max(1, ceiling(need/dfloat(max_bytes)))
+      end if
+      if (n_chunks > n_sites) n_chunks = n_sites
+
+      allocate (i_beg(1:n_chunks), i_end(1:n_chunks))
+      allocate (j_beg(1:n_chunks), j_end(1:n_chunks))
+
+      i_beg(1) = 1
+      j_beg(1) = 1
+      i_end(n_chunks) = n_sites
+      j_end(n_chunks) = n_pairs
+      if (n_chunks == 1) return
+
+      pairs_per_chunk = dfloat(n_pairs)/dfloat(n_chunks)
+      k = 0
+      k2 = 0
+      chunk = 1
+      do i = 1, n_sites
+         do k2 = 1, n_neigh(i)
+            k = k + 1
+         end do
+         if (dfloat(k) >= dfloat(chunk)*pairs_per_chunk) then
+            i_end(chunk) = i
+            j_end(chunk) = k
+            chunk = chunk + 1
+            if (chunk > n_chunks) exit
+            i_beg(chunk) = i + 1
+            j_beg(chunk) = k + 1
+            if (chunk == n_chunks) exit
+         end if
+      end do
+   end subroutine plan_batches
+
 !  The descriptor, left on the device. Shared by both public entries.
    subroutine run_get_soap(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, phis, &
                            alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
@@ -280,12 +376,13 @@ contains
                                             amplitude_scaling, radial_enhancement, &
                                             central_weight, basis, scaling_mode, compress, &
                                             n_nonzero, p_j, dim, n_sparse, qs, alphas, &
-                                            delta, zeta, e0, do_forces, &
+                                            delta, zeta, e0, do_forces, max_bytes, &
                                             energies, forces, virial) &
       bind(c, name="madlib_soap_energy_forces_gpu")
 
       integer(c_int), value :: n_sites, n_pairs, n_force, n_species, l_max, radial_enhancement
       integer(c_int), value :: compress, n_nonzero, dim, n_sparse, do_forces
+      integer(c_size_t), value :: max_bytes
       integer(c_int), intent(in), target :: n_neigh(*), species_idx(*), alpha_max(*), p_j(*)
       integer(c_int), intent(in) :: neighbors_list(*)
       real(c_double), intent(in), target :: rjs(*), thetas(*), phis(*), xyz(*)
@@ -298,27 +395,102 @@ contains
       real(c_double), value :: delta, zeta, e0
       real(c_double), intent(out) :: energies(*), forces(*), virial(*)
 
-      type(soap_buffers) :: buf
       type(soap_turbo), target :: hypers
-      type(c_ptr) :: n_neigh_d
-      real(dp), allocatable, target :: soap(:, :), soap_cart_der(:, :, :)
-      real(dp), allocatable :: e_loc(:), f_loc(:, :), v_loc(:, :)
-      real(dp) :: solo_time
-      integer(c_int) :: np
-      integer :: i, j, n
+      real(dp), allocatable :: e_b(:), f_b(:, :), v_b(:, :)
+      integer, allocatable :: i_beg(:), i_end(:), j_beg(:), j_end(:)
+      integer :: n_chunks, c, ns_b, np_b, ib, ie, jb, je, i, j, n
       logical :: do_f
 
       do_f = (do_forces /= 0)
-      call run_get_soap(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, phis, &
-                        alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
-                        atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, atom_sigma_t_scaling, &
-                        amplitude_scaling, radial_enhancement, central_weight, basis, &
-                        scaling_mode, compress, n_nonzero, p_j, dim, do_f, buf, soap, &
-                        soap_cart_der)
+      call madlib_soap_gpu_init()
 
-!     soap_backend_begin reads only n_sparse, dim, alphas, Qs and the kind of
-!     nf(1), so a minimal hypers carries what it needs rather than a whole
-!     parsed descriptor.
+      energies(1:n_sites) = 0.d0
+      if (do_f) then
+         forces(1:3*n_force) = 0.d0
+         virial(1:9) = 0.d0
+      end if
+
+!     The sparse set is uploaded once, not once per batch: it does not depend on
+!     which sites are in flight, and it is the largest single upload here.
+      call build_hypers(n_sparse, dim, qs, alphas, hypers)
+      call soap_backend_begin(hypers)
+
+      call plan_batches(n_sites, n_pairs, n_neigh, l_max, sum(alpha_max(1:n_species)), dim, &
+                        n_species, max_bytes, n_chunks, i_beg, i_end, j_beg, j_end)
+
+      call report_batches(n_chunks, n_sites, n_pairs)
+
+      allocate (e_b(1:n_sites), f_b(1:3, 1:n_force), v_b(1:3, 1:3))
+
+      do c = 1, n_chunks
+         ib = i_beg(c)
+         ie = i_end(c)
+         jb = j_beg(c)
+         je = j_end(c)
+         ns_b = ie - ib + 1
+         np_b = je - jb + 1
+         if (ns_b <= 0 .or. np_b <= 0) cycle
+
+!        Each batch overwrites rather than accumulates -- get_soap_energy_and_forces
+!        declares energies, forces and virial intent(out) and zeroes them -- so the
+!        accumulation happens here.
+         call one_batch(ns_b, np_b, n_force, n_species, n_neigh(ib), neighbors_list(jb), &
+                        species_idx(jb), rjs(jb), thetas(jb), phis(jb), xyz(3*jb - 2), &
+                        alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
+                        atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, &
+                        atom_sigma_t_scaling, amplitude_scaling, radial_enhancement, &
+                        central_weight, basis, scaling_mode, compress, n_nonzero, p_j, &
+                        dim, n_sparse, delta, zeta, e0, do_f, e_b, f_b, v_b)
+
+         energies(ib:ie) = e_b(1:ns_b)
+         if (do_f) then
+            n = 0
+            do j = 1, n_force
+               do i = 1, 3
+                  n = n + 1
+                  forces(n) = forces(n) + f_b(i, j)
+               end do
+            end do
+            n = 0
+            do j = 1, 3
+               do i = 1, 3
+                  n = n + 1
+                  virial(n) = virial(n) + v_b(i, j)
+               end do
+            end do
+         end if
+      end do
+
+      call soap_backend_end()
+      deallocate (e_b, f_b, v_b, i_beg, i_end, j_beg, j_end)
+      deallocate (hypers%nf, hypers%alphas, hypers%Qs)
+   end subroutine madlib_soap_energy_forces_gpu
+
+!  Say how the work was split, when asked.
+!
+!  A test that forces many batches and finds the answer unchanged proves nothing
+!  unless the split actually happened -- if the budget were silently ignored it
+!  would agree for that reason. MADLIB_SOAP_BATCH_REPORT is how the test checks.
+   subroutine report_batches(n_chunks, n_sites, n_pairs)
+      integer, intent(in) :: n_chunks, n_sites, n_pairs
+      character(len=32) :: env
+
+      call get_environment_variable("MADLIB_SOAP_BATCH_REPORT", env)
+      if (len_trim(env) == 0) return
+      write (0, '(a,i0,a,i0,a,i0,a)') "    soap batches: ", n_chunks, " for ", n_sites, &
+         " sites, ", n_pairs, " pairs"
+   end subroutine report_batches
+
+!  soap_backend_begin reads only n_sparse, dim, alphas, Qs and the kind of
+!  nf(1), so a minimal hypers carries what it needs rather than a whole parsed
+!  descriptor.
+   subroutine build_hypers(n_sparse, dim, qs, alphas, hypers)
+      integer(c_int), intent(in) :: n_sparse, dim
+      real(c_double), intent(in) :: qs(*), alphas(*)
+      type(soap_turbo), intent(out) :: hypers
+
+      integer :: i, j, n
+
       hypers%n_sparse = n_sparse
       hypers%dim = dim
       allocate (hypers%nf(1:1))
@@ -333,49 +505,61 @@ contains
             hypers%Qs(i, j) = qs(n)
          end do
       end do
-      call soap_backend_begin(hypers)
+   end subroutine build_hypers
 
-      allocate (e_loc(1:n_sites), f_loc(1:3, 1:n_force), v_loc(1:3, 1:3))
-      e_loc = 0.d0
-      f_loc = 0.d0
-      v_loc = 0.d0
+!  One batch: descriptor, then prediction, on a contiguous run of sites.
+   subroutine one_batch(n_sites, n_pairs, n_force, n_species, n_neigh, neighbors_list, &
+                        species_idx, rjs, thetas, phis, xyz, alpha_max, l_max, rcut_hard, &
+                        rcut_soft, nf, global_scaling, atom_sigma_r, atom_sigma_r_scaling, &
+                        atom_sigma_t, atom_sigma_t_scaling, amplitude_scaling, &
+                        radial_enhancement, central_weight, basis, scaling_mode, compress, &
+                        n_nonzero, p_j, dim, n_sparse, delta, zeta, e0, do_f, e_out, f_out, v_out)
+      integer, intent(in) :: n_sites, n_pairs, n_force
+      integer(c_int), value :: n_species, l_max, radial_enhancement, compress, n_nonzero
+      integer(c_int), value :: dim, n_sparse
+      integer(c_int), intent(in), target :: n_neigh(*), species_idx(*), alpha_max(*), p_j(*)
+      integer(c_int), intent(in) :: neighbors_list(*)
+      real(c_double), intent(in), target :: rjs(*), thetas(*), phis(*), xyz(*)
+      real(c_double), intent(in), target :: rcut_hard(*), rcut_soft(*), nf(*), global_scaling(*)
+      real(c_double), intent(in), target :: atom_sigma_r(*), atom_sigma_r_scaling(*)
+      real(c_double), intent(in), target :: atom_sigma_t(*), atom_sigma_t_scaling(*)
+      real(c_double), intent(in), target :: amplitude_scaling(*), central_weight(*)
+      character(kind=c_char), intent(in) :: basis(*), scaling_mode(*)
+      real(c_double), value :: delta, zeta, e0
+      logical, intent(in) :: do_f
+      real(dp), intent(out) :: e_out(:), f_out(:, :), v_out(:, :)
+
+      type(soap_buffers) :: buf
+      type(c_ptr) :: n_neigh_d
+      real(dp), allocatable, target :: soap(:, :), soap_cart_der(:, :, :)
+      real(dp) :: solo_time
+      integer(c_int) :: np
+
+      call run_get_soap(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, phis, &
+                        alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
+                        atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, atom_sigma_t_scaling, &
+                        amplitude_scaling, radial_enhancement, central_weight, basis, &
+                        scaling_mode, compress, n_nonzero, p_j, dim, do_f, buf, soap, &
+                        soap_cart_der)
+
+      e_out = 0.d0
+      f_out = 0.d0
+      v_out = 0.d0
       solo_time = 0.d0
       np = n_pairs
 
 !     soap and soap_cart_der are passed for their SHAPE: the routine reads
 !     n_soap and n_sites from them and takes the values from the device.
-!     n_neigh_d is the same scratch-wearing-an-argument as in run_get_soap, and
-!     is not referenced in the body.
+!     n_neigh_d is scratch wearing an argument's clothes, as in run_get_soap.
       call get_soap_energy_and_forces(n_sparse, soap, soap_cart_der, delta, zeta, e0, &
                                       n_neigh(1:n_sites), neighbors_list(1:n_pairs), &
                                       reshape(xyz(1:3*n_pairs), [3, n_pairs]), do_f, .false., &
-                                      e_loc, f_loc, v_loc, solo_time, buf%soap_d, buf%der_d, &
+                                      e_out, f_out, v_out, solo_time, buf%soap_d, buf%der_d, &
                                       n_neigh_d, np)
 
-      call soap_backend_end()
-
-      energies(1:n_sites) = e_loc(1:n_sites)
-      if (do_f) then
-         n = 0
-         do j = 1, n_force
-            do i = 1, 3
-               n = n + 1
-               forces(n) = f_loc(i, j)
-            end do
-         end do
-         n = 0
-         do j = 1, 3
-            do i = 1, 3
-               n = n + 1
-               virial(n) = v_loc(i, j)
-            end do
-         end do
-      end if
-
       call release(buf)
-      deallocate (soap, soap_cart_der, e_loc, f_loc, v_loc)
-      deallocate (hypers%nf, hypers%alphas, hypers%Qs)
-   end subroutine madlib_soap_energy_forces_gpu
+      deallocate (soap, soap_cart_der)
+   end subroutine one_batch
 
    subroutine upload(src, dst, nbytes)
       type(c_ptr), intent(in) :: src

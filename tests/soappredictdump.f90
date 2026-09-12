@@ -46,6 +46,7 @@ program soappredictdump
    integer :: i, j, k, p, a
    character(len=256) :: outfile, env
    integer(8) :: c0, c1, crate
+   integer(c_size_t) :: max_bytes
 
    call get_command_argument(1, outfile)
    if (len_trim(outfile) == 0) outfile = "soappredict.dat"
@@ -61,6 +62,12 @@ program soappredictdump
    if (len_trim(env) > 0) read (env, *) n_per
    call get_environment_variable("MADLIB_REPS", env)
    if (len_trim(env) > 0) read (env, *) n_reps
+   ! Device memory budget in bytes; 0 means one batch. Forcing many batches on a
+   ! configuration that fits in one is how the split gets tested -- the answer
+   ! must not depend on it.
+   max_bytes = 0_c_size_t
+   call get_environment_variable("MADLIB_MAX_BYTES", env)
+   if (len_trim(env) > 0) read (env, *) max_bytes
    n_pairs = n_sites*n_per
    allocate (n_neigh(n_sites), species_idx(n_pairs), neighbors_list(n_pairs))
    allocate (rjs(n_pairs), thetas(n_pairs), phis(n_pairs), xyz(3*n_pairs))
@@ -126,7 +133,7 @@ program soappredictdump
                                       atom_sigma_t, atom_sigma_t_scaling, amplitude_scaling, 0, &
                                       central_weight, "poly3gauss"//c_null_char, &
                                       "polynomial"//c_null_char, 0, 1, p_j, dim, n_sparse, &
-                                      qs_sp, alphas, delta, zeta, v0, 1, energies, forces, virial)
+                                      qs_sp, alphas, delta, zeta, v0, 1, max_bytes, energies, forces, virial)
 #else
    call madlib_local_property(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, &
                               phis, alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
