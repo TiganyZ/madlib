@@ -236,6 +236,13 @@ stage_madlib() {
             die "set MADLIB_SOURCE to a MADLIB checkout, or clone it to $mad"
         fi
     fi
+    # A .mod file is tied to the exact gfortran that wrote it, so artefacts
+    # carried over from another machine fail with "created by a different
+    # version of GNU Fortran" rather than being rebuilt.
+    step "clearing any stale fortran build artefacts"
+    rm -f "$mad"/lib/madlib/*.mod "$mad"/lib/madlib/*.o \
+          "$mad"/lib/madlib/turbogap/*.o "$mad"/lib/madlib/libmadlib.a
+
     step "linking into lammps"
     ln -sfn "$mad/src/MADLIB" "$PREFIX/lammps/src/MADLIB"
     ln -sfn "$mad/lib/madlib" "$PREFIX/lammps/lib/madlib"
