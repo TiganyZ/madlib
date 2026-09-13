@@ -605,19 +605,15 @@ contains
 
       type(soap_buffers) :: buf
       real(dp), allocatable, target :: soap(:, :), soap_cart_der(:, :, :)
+      real(dp), allocatable :: qs_m(:, :)
       real(dp), pointer :: der_p(:, :)
+      integer, allocatable :: i_beg(:), i_end(:), j_beg(:), j_end(:)
+      integer :: n_chunks, c, ib, ie, jb, je, ns_b, np_b
+      integer(c_size_t) :: max_bytes
       logical :: do_der
 
       do_der = (do_derivatives /= 0)
-      call run_get_soap(n_sites, n_pairs, n_species, n_neigh, species_idx, rjs, thetas, phis, &
-                        alpha_max, l_max, rcut_hard, rcut_soft, nf, global_scaling, &
-                        atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, atom_sigma_t_scaling, &
-                        amplitude_scaling, radial_enhancement, central_weight, basis, &
-                        scaling_mode, compress, n_nonzero, p_j, dim, do_der, buf, soap, &
-                        soap_cart_der)
-
-      call cpy_dtoh_blocking(buf%soap_d, c_loc(soap), buf%st_soap)
-      if (do_der) call cpy_dtoh_blocking(buf%der_d, c_loc(soap_cart_der), buf%st_der)
+      call madlib_soap_gpu_init()
 
       ! dV/dr is one vector per PAIR, not per component: (3, n_pairs). The
       ! descriptor derivative it comes from is (3, dim, n_pairs); the
@@ -628,14 +624,84 @@ contains
          call c_f_pointer(c_loc(v_der), der_p, [3, 1])
       end if
 
-      call local_property_predict(soap, reshape(qs(1:dim*n_sparse), [dim, n_sparse]), &
-                                  alphas(1:n_sparse), v0, delta, zeta, v(1:n_sites), &
-                                  do_der, soap_cart_der, n_neigh(1:n_sites), der_p, &
-                                  zero_trunc=(zero_trunc /= 0))
+!     Batched, because a rank's whole neighbour list does not fit: 2457 atoms
+!     of glassy carbon is already an out-of-memory abort on a 6 GB card. Unlike
+!     madlib_soap_energy_forces_gpu this takes no budget argument -- the C entry
+!     point is TurboGAP's local-property one and pair_turbogap passes what that
+!     needs -- so the budget comes from the device.
+!
+!     The split is exact rather than approximate: local_property_predict is per
+!     site and per pair with no coupling between them, so a batch's V and dV/dr
+!     go straight into their slice of the caller's arrays.
+      max_bytes = soap_budget_bytes()
+      call plan_batches(n_sites, n_pairs, n_neigh, l_max, sum(alpha_max(1:n_species)), dim, &
+                        n_species, max_bytes, n_chunks, i_beg, i_end, j_beg, j_end)
+      call report_batches(n_chunks, n_sites, n_pairs)
 
-      call release(buf)
-      deallocate (soap, soap_cart_der)
+      qs_m = reshape(qs(1:dim*n_sparse), [dim, n_sparse])
+
+      do c = 1, n_chunks
+         ib = i_beg(c)
+         ie = i_end(c)
+         jb = j_beg(c)
+         je = j_end(c)
+         ns_b = ie - ib + 1
+         np_b = je - jb + 1
+         if (ns_b <= 0 .or. np_b <= 0) cycle
+
+         call run_get_soap(ns_b, np_b, n_species, n_neigh(ib), species_idx(jb), rjs(jb), &
+                           thetas(jb), phis(jb), alpha_max, l_max, rcut_hard, rcut_soft, nf, &
+                           global_scaling, atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, &
+                           atom_sigma_t_scaling, amplitude_scaling, radial_enhancement, &
+                           central_weight, basis, scaling_mode, compress, n_nonzero, p_j, dim, &
+                           do_der, buf, soap, soap_cart_der)
+
+         call cpy_dtoh_blocking(buf%soap_d, c_loc(soap), buf%st_soap)
+         if (do_der) call cpy_dtoh_blocking(buf%der_d, c_loc(soap_cart_der), buf%st_der)
+
+         if (do_der) then
+            call local_property_predict(soap, qs_m, alphas(1:n_sparse), v0, delta, zeta, &
+                                        v(ib:ie), do_der, soap_cart_der, n_neigh(ib:ie), &
+                                        der_p(:, jb:je), zero_trunc=(zero_trunc /= 0))
+         else
+            call local_property_predict(soap, qs_m, alphas(1:n_sparse), v0, delta, zeta, &
+                                        v(ib:ie), do_der, soap_cart_der, n_neigh(ib:ie), &
+                                        der_p, zero_trunc=(zero_trunc /= 0))
+         end if
+
+         call release(buf)
+         deallocate (soap, soap_cart_der)
+      end do
    end subroutine madlib_local_property_gpu
+
+!  Device bytes one SOAP batch may use.
+!
+!  Half of what is free, not all of it: the memory model in plan_batches is an
+!  estimate over six terms, cuBLAS takes a workspace this does not see, and in
+!  a LAMMPS run Kokkos owns device memory too. MADLIB_SOAP_MAX_GB overrides it
+!  for a run that wants a fixed decomposition -- the batch boundaries move the
+!  last digits of a sum, so a bit-exact comparison needs the budget pinned.
+   function soap_budget_bytes() result(b)
+      integer(c_size_t) :: b
+
+      real(dp), parameter :: FRACTION = 0.5d0
+      integer(c_size_t) :: dev_free, dev_total, live, peak
+      character(len=32) :: env
+      real(dp) :: gb
+      integer :: st
+
+      call get_environment_variable("MADLIB_SOAP_MAX_GB", env)
+      if (len_trim(env) > 0) then
+         read (env, *, iostat=st) gb
+         if (st == 0 .and. gb > 0.d0) then
+            b = int(gb*1024.d0**3, c_size_t)
+            return
+         end if
+      end if
+
+      call gpu_mem_stats(dev_free, dev_total, live, peak)
+      b = int(dfloat(dev_free)*FRACTION, c_size_t)
+   end function soap_budget_bytes
 
    subroutine upload(src, dst, nbytes)
       type(c_ptr), intent(in) :: src
