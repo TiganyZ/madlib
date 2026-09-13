@@ -643,19 +643,33 @@ pairgpu)
     echo "    SKIP: set LMP_GPU to an lmp built with -D MADLIB_ENABLE_GPU=on"
   else
     L=/tmp/madlib_pairgpu
-    rm -f md_ref.dump md_host.dump md_gpu.dump
+    rm -f md_ref.dump md_host.dump md_gpu.dump md_gpusplit.dump
     $LMP -in in.md_ref -log none >${L}_host.log 2>&1; hrc=$?
     mv -f md_ref.dump md_host.dump 2>/dev/null
     $LMP_GPU -in in.md_ref -log none >${L}_dev.log 2>&1; drc=$?
     mv -f md_ref.dump md_gpu.dump 2>/dev/null
-    if [ $hrc -ne 0 ] || [ $drc -ne 0 ] || ! have md_host.dump || ! have md_gpu.dump; then
+    # The same run forced into many batches. The descriptor does not fit for a
+    # rank of any size, so pair_turbogap always takes this path; a leg that only
+    # ran the one-batch case would be testing the rarer half.
+    MADLIB_SOAP_MAX_GB=0.02 MADLIB_SOAP_BATCH_REPORT=1 \
+      $LMP_GPU -in in.md_ref -log none >${L}_split.log 2>&1; src=$?
+    mv -f md_ref.dump md_gpusplit.dump 2>/dev/null
+    nb=$(grep -c "soap batches" ${L}_split.log 2>/dev/null)
+    if [ $hrc -ne 0 ] || [ $drc -ne 0 ] || [ $src -ne 0 ] \
+       || ! have md_host.dump || ! have md_gpu.dump || ! have md_gpusplit.dump; then
       tail -8 ${L}_dev.log | sed 's/^/     /'
-      bad "one of the two backends did not finish five steps"
-    elif $PYTHON compare_pair_md.py md_host.dump ${L}_host.log \
-                                    device md_gpu.dump ${L}_dev.log; then
-      ok "the device backend gives the host's trajectory"
+      bad "one of the backends did not finish five steps"
+    elif [ "${nb:-0}" -eq 0 ]; then
+      bad "the forced-batch run reported no batches, so it tested nothing"
     else
-      bad "the device backend disagrees with the host"
+      echo "    forced split: $(grep -m1 'soap batches' ${L}_split.log | sed 's/^ *//')"
+      if $PYTHON compare_pair_md.py md_host.dump ${L}_host.log \
+                                    device md_gpu.dump ${L}_dev.log \
+                                    device_batched md_gpusplit.dump ${L}_split.log; then
+        ok "the device backend gives the host's trajectory, batched or not"
+      else
+        bad "the device backend disagrees with the host"
+      fi
     fi
   fi
   ;;
