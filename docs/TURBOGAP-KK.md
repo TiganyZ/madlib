@@ -693,3 +693,60 @@ TurboGAP's Makefile. Checked: all fourteen `.cu` compile at C++20 as well, so
 the cmake path uses one standard and copies the `.cc` in as `.cu` rather than
 carrying per-source language and `-x cu` properties whose flag order against the
 standard flag is not guaranteed.
+
+### The entry the pair style calls had to be batched
+
+Building it was not enough. `pair_style turbogap` with the device backend ran
+91 and 728 atoms and then **aborted out of memory at 2457** on a 6 GB card:
+
+    GPUmem: device allocation of 0.219 GB FAILED: out of memory
+    GPUassert: out of memory src/gpu/gpu_memory.cu 227
+
+`madlib_soap_energy_forces_gpu` had the batch loop; `madlib_local_property` —
+the entry `pair_turbogap.cpp` actually calls, and the whole SOAP term for the
+pair style — did not, and ran the rank in one shot. It has it now.
+
+Two differences from the other entry. It takes **no budget argument**: its C
+signature is TurboGAP's local-property one and the pair style passes what that
+needs, so the budget comes from `gpu_mem_stats` (half of free device memory;
+`MADLIB_SOAP_MAX_GB` overrides). And the split is **exact rather than
+approximate** — `local_property_predict` is per site and per pair with no
+coupling between them, so a batch's V and dV/dr go straight into their slice of
+the caller's arrays.
+
+The decomposition is measured per call, not cached. It therefore settles rather
+than being fixed: the first call sees an empty device and takes three batches,
+every later one takes six, because cuBLAS and the sparse set are resident by
+then. That moves the last digits between step 0 and step 1. Deliberately not a
+remembered minimum — a budget that can only tighten is the batch-count ratchet,
+where one transient dip runs the count to 900 and never recovers. Pin
+`MADLIB_SOAP_MAX_GB` for a fixed decomposition.
+
+### Measured, RTX A2000, glassy carbon with CO.gap
+
+Per-step SOAP, `TURBOGAP_PROFILE=1`, host build against device build:
+
+| atoms | host | device | |
+|---|---|---|---|
+| 728 | 539 ms | 441 ms | 1.22x |
+| 2457 | 1537 ms | 1175 ms | 1.31x |
+
+Less than the 1.67x the standalone driver gets, and the reason is visible in
+the design: the shim computes the descriptor on the device and copies the
+**whole derivative tensor** back — 3 × dim × n_pairs doubles, hundreds of MB
+per call — to do the sparse-GP contraction on the host. That contraction is on
+the host on purpose (`gpu_local_property_predict` has no `zero_trunc`, §8), so
+closing this gap means fixing that in TurboGAP, not tuning here.
+
+### Proof the device path is the one running
+
+A passing comparison alone would not distinguish "the device reproduces the
+host" from "it quietly fell back". Three checks, in the same session:
+
+- the device build links cuBLAS, the host build does not;
+- 23 `madlib_soap_gpu` symbols against zero;
+- with `CUDA_VISIBLE_DEVICES=` the device build **dies** (rc 100) where the
+  host build completes.
+
+The `pairgpu` leg also forces a twelve-batch split and fails if the run reports
+no batches at all, so it cannot pass by testing the one-batch case twice.
