@@ -279,9 +279,31 @@ cmake_flags() {
         echo "-D PKG_KOKKOS=on -D Kokkos_ENABLE_$KOKKOS_BACKEND=on -D Kokkos_ARCH_$GPU_ARCH=on"
         echo "-D Kokkos_ENABLE_OPENMP=on -D SYMMETRIX_KOKKOS=on"
         echo "-D CMAKE_CXX_COMPILER=$PREFIX/lammps/lib/kokkos/bin/nvcc_wrapper"
+        # Naming the toolkit ROOT, not just putting its bin on PATH. Without
+        # this cmake finds whatever libcudart the system ships -- on a machine
+        # with CUDA 12 installed and a newer one under /usr/local, the device
+        # code is compiled by the newer nvcc and linked against the older
+        # runtime. That builds and links cleanly and then dies as a SIGFPE
+        # inside a Kokkos parallel_for launch, naming nothing recognisable.
+        echo "-D CUDAToolkit_ROOT=$CUDA_HOME"
     else
         echo "-D SYMMETRIX_KOKKOS=off"
     fi
+}
+
+# The runtime the binary resolves must match the nvcc that built its device
+# code. Checked rather than assumed: the failure mode is silent at build time.
+check_cuda_runtime() {
+    [ -n "$GPU_ARCH" ] || return 0
+    local lmp=$PREFIX/lammps/build/lmp got want
+    [ -x "$lmp" ] || return 0
+    got=$(ldd "$lmp" 2>/dev/null | sed -n 's/.*libcudart\.so\.\([0-9]*\).*/\1/p' | head -1)
+    want=$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9]*\)\..*/\1/p')
+    [ -n "$got" ] && [ -n "$want" ] || return 0
+    if [ "$got" != "$want" ]; then
+        die "linked libcudart.so.$got but nvcc is $want -- set CUDA_HOME to one toolkit"
+    fi
+    step "cuda runtime $got matches nvcc"
 }
 
 stage_build() {
@@ -300,6 +322,7 @@ stage_build() {
     # shellcheck disable=SC2046
     ( cd "$build" && cmake ../cmake $(cmake_flags) ) || die "cmake failed"
     ( cd "$build" && make -j"$JOBS" ) || die "build failed"
+    check_cuda_runtime
     step "binary: $build/lmp"
 }
 

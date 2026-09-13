@@ -558,7 +558,41 @@ Three things to settle when it is done:
   reductions are `__shared__` trees over doubles, and a Kokkos reduction
   reassociates them. It is fine to *call*; it is not fine to rewrite.
 
-## 9. Toolchain notes for `alt`
+## 9. The CUDA runtime trap
+
+Found by building from clean clones, and worth its own section because the
+failure names nothing.
+
+Putting a toolkit's `bin` on `PATH` is not enough. cmake finds `libcudart`
+separately, and on a machine that has a system CUDA 12 alongside a newer one
+under `/usr/local`, you get **device code compiled by nvcc 13.4 linked against
+the CUDA 12 runtime**. It configures, compiles and links without a word.
+
+Then `lmp -k on g 1` dies with **SIGFPE**, before reading any input, in:
+
+    Kokkos::UnorderedMap<int, int, Kokkos::Cuda>::UnorderedMap
+      -> deep_copy -> contiguous_fill_or_memset -> parallel_for
+
+An integer divide by zero computing launch geometry, because the occupancy
+query against a fatbin the runtime does not understand returns zero. Nothing in
+that trace mentions CUDA versions, MADLIB, or the pair style. `-k on` without a
+GPU works fine, which makes it look like a device problem rather than a build
+one.
+
+The check is one line, and both `tools/install_turbogap_lammps.sh` and the
+clean-room script now do it after building:
+
+    ldd lmp | grep libcudart     # .so.13
+    nvcc --version               # release 13.4
+
+The fix is to name the toolkit root, not just its bin:
+
+    -D CUDAToolkit_ROOT=/usr/local/cuda-13.4
+
+`install_turbogap_lammps.sh` was missing exactly this: it exported `CUDA_HOME`
+and prepended `$CUDA_HOME/bin` to `PATH`, and never told cmake.
+
+## 10. Toolchain notes for `alt`
 
 ```sh
 export PATH=/usr/local/cuda-13.4/bin:$PATH      # NOT the 12.0 on the default PATH
