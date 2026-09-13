@@ -783,3 +783,18 @@ them, and the silent version of this failure is worse than the loud one.
 This is the same "one soap_turbo per binary" constraint as the link-level trap
 in §4, one level lower down: at the **module** level it does not even need two
 object files, only two files with the same name on a search path nobody passed.
+
+### Ranks sharing a card
+
+Batching by itself was still not enough. Every rank asks the device how much
+memory is free and takes a fraction of it, and they all get the same answer, so
+four ranks on one GPU budget four halves of the same memory. Measured: 5824
+atoms on 4 ranks aborted with twelve out-of-memory hits.
+
+The budget is now divided by the ranks sharing the card — node-local rank count
+over visible devices, because `cuda_set_device` assigns them round-robin. The
+same run then takes seven batches per rank instead of two and completes. The
+`pairgpu` leg asserts the divisor rather than running something large enough to
+OOM, which no leg can afford: with `MADLIB_SOAP_BATCH_REPORT=1` the shim prints
+the budget and the rank share, and the leg checks the share equals the rank
+count.

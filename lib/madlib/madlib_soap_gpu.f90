@@ -22,6 +22,7 @@
 module madlib_soap_gpu
 
    use iso_c_binding
+   use mpi
    use F_B_C
    use madlib_soap_dims, only: c_to_f_string
    use soap_turbo_desc, only: get_soap
@@ -53,6 +54,9 @@ module madlib_soap_gpu
    integer(c_size_t), save :: st_S_d = 0
    integer(c_size_t), save :: st_multiplicity_array_d = 0
    logical, save :: recompute_basis = .true.
+
+!  Ranks sharing this rank's GPU; 0 until device_share() works it out.
+   integer, save :: ranks_per_device = 0
 
 !  What one descriptor call allocates. Bundled so the two public entries can
 !  share the setup without an argument list of thirteen device pointers, and so
@@ -681,6 +685,10 @@ contains
 !  a LAMMPS run Kokkos owns device memory too. MADLIB_SOAP_MAX_GB overrides it
 !  for a run that wants a fixed decomposition -- the batch boundaries move the
 !  last digits of a sum, so a bit-exact comparison needs the budget pinned.
+!
+!  Divided by the ranks sharing the card, because every one of them asks the
+!  same question and gets the same answer. Four ranks each budgeting half of
+!  free memory is an out-of-memory abort, which is what it was.
    function soap_budget_bytes() result(b)
       integer(c_size_t) :: b
 
@@ -688,7 +696,7 @@ contains
       integer(c_size_t) :: dev_free, dev_total, live, peak
       character(len=32) :: env
       real(dp) :: gb
-      integer :: st
+      integer :: st, share
 
       call get_environment_variable("MADLIB_SOAP_MAX_GB", env)
       if (len_trim(env) > 0) then
@@ -700,8 +708,46 @@ contains
       end if
 
       call gpu_mem_stats(dev_free, dev_total, live, peak)
-      b = int(dfloat(dev_free)*FRACTION, c_size_t)
+      share = device_share()
+      b = int(dfloat(dev_free)*FRACTION/dfloat(share), c_size_t)
+
+      call get_environment_variable("MADLIB_SOAP_BATCH_REPORT", env)
+      if (len_trim(env) > 0) then
+         write (0, '(a,i0,a,i0)') "    soap budget: ", b, " bytes, ranks on this gpu ", share
+      end if
    end function soap_budget_bytes
+
+!  How many ranks share this rank's GPU.
+!
+!  Node-local rank count over visible devices, because cuda_set_device assigns
+!  them round-robin -- that is what fortran_cuda_interfaces.f90:796 says it
+!  does. Cached: the topology cannot change during a run, and
+!  MPI_Comm_split_type allocates a communicator on every call.
+   function device_share() result(n)
+      integer :: n
+
+      integer :: ierr, shared, sz, ndev
+      logical :: inited
+
+      if (ranks_per_device > 0) then
+         n = ranks_per_device
+         return
+      end if
+
+      n = 1
+      call mpi_initialized(inited, ierr)
+      if (inited) then
+         call mpi_comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, &
+                                  MPI_INFO_NULL, shared, ierr)
+         if (ierr == MPI_SUCCESS) then
+            call mpi_comm_size(shared, sz, ierr)
+            call mpi_comm_free(shared, ierr)
+            ndev = max(1, gpu_device_count())
+            n = max(1, (sz + ndev - 1)/ndev)
+         end if
+      end if
+      ranks_per_device = n
+   end function device_share
 
    subroutine upload(src, dst, nbytes)
       type(c_ptr), intent(in) :: src

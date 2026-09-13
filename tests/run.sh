@@ -54,8 +54,8 @@ have() { [ -e "$1" ]; }
 fortran_check() {
   local stem=$1 what=$2
   local lib=../lib/madlib
-  if [ ! -f "$lib/libmadlib.a" ]; then
-    echo "    SKIP: $lib/libmadlib.a is not built (make -C $lib)"
+  if [ ! -f "$lib/libmadlib.a" ] || [ ! -d "$lib/mod" ]; then
+    echo "    SKIP: $lib is not built (make -C $lib)"
     return
   fi
   if ! command -v gfortran >/dev/null; then
@@ -443,8 +443,8 @@ soapgpu)
   leg "the device SOAP descriptor reproduces the host's"
   LIB=../lib/madlib
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
-  if [ ! -f "$LIB/libmadlib.a" ]; then
-    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
+    echo "    SKIP: $LIB is not built (make -C $LIB)"
   elif [ ! -d "$GPUOBJ" ]; then
     echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
   else
@@ -489,8 +489,8 @@ soappredict)
   leg "the device SOAP energies and forces reproduce the host's"
   LIB=../lib/madlib
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
-  if [ ! -f "$LIB/libmadlib.a" ]; then
-    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
+    echo "    SKIP: $LIB is not built (make -C $LIB)"
   elif [ ! -d "$GPUOBJ" ]; then
     echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
   else
@@ -516,8 +516,8 @@ soapswap)
   leg "the same call gives the same answer on either backend"
   LIB=../lib/madlib
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
-  if [ ! -f "$LIB/libmadlib.a" ]; then
-    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
+    echo "    SKIP: $LIB is not built (make -C $LIB)"
   elif [ ! -d "$GPUOBJ" ]; then
     echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
   else
@@ -555,8 +555,8 @@ soapbatch)
   leg "splitting SOAP into batches changes no answer"
   LIB=../lib/madlib
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
-  if [ ! -f "$LIB/libmadlib.a" ]; then
-    echo "    SKIP: $LIB/libmadlib.a is not built (make -C $LIB)"
+  if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
+    echo "    SKIP: $LIB is not built (make -C $LIB)"
   elif [ ! -d "$GPUOBJ" ]; then
     echo "    SKIP: no device objects -- tools/build_soap_gpu.sh <turbogap-src>"
   elif ! build_cpu_and_gpu soappredictdump /tmp/mad_bat_cpu /tmp/mad_bat_gpu; then
@@ -669,6 +669,18 @@ pairgpu)
         ok "the device backend gives the host's trajectory, batched or not"
       else
         bad "the device backend disagrees with the host"
+      fi
+      # Ranks sharing a card each measure the same free memory, so the budget
+      # has to be divided by how many of them there are or they oversubscribe
+      # it -- four ranks was an out-of-memory abort. Checked here rather than
+      # by running something big enough to OOM, which no leg can afford.
+      MADLIB_SOAP_BATCH_REPORT=1 mpirun --oversubscribe $MPIRUN_EXTRA -np "$RANKS" \
+        $LMP_GPU -in in.md_ref -log none >${L}_ranks.log 2>&1
+      seen=$(grep -m1 -o "ranks on this gpu [0-9]*" ${L}_ranks.log | grep -o "[0-9]*$")
+      if [ "${seen:-0}" -eq "$RANKS" ]; then
+        ok "the batch budget is shared between the $RANKS ranks on the card"
+      else
+        bad "$RANKS ranks share the card but the budget says ${seen:-none}"
       fi
     fi
   fi
