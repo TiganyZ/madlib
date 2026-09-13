@@ -276,6 +276,7 @@ stage_madlib() {
     # carried over from another machine fail with "created by a different
     # version of GNU Fortran" rather than being rebuilt.
     step "clearing any stale fortran build artefacts"
+    rm -rf "$mad"/lib/madlib/mod
     rm -f "$mad"/lib/madlib/*.mod "$mad"/lib/madlib/*.o \
           "$mad"/lib/madlib/turbogap/*.o "$mad"/lib/madlib/libmadlib.a
 

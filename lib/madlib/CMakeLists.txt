@@ -14,6 +14,21 @@ set(MADLIB_COMMON_SOURCES
   madlib_soap_dims.f90
   madlib_gap.f90)
 
+# gfortran searches the directory of the file it is compiling for .mod files,
+# so a stale module beside these sources is preferred over the one this build
+# produced. That is not a cosmetic clash: the CPU and GPU soap_turbo both
+# define soap_turbo_desc, and picking up the wrong one resolves get_soap to the
+# wrong argument count -- 34 against 48 -- which reads as a broken shim rather
+# than a stale artefact. `make` here used to leave them; it writes to mod/ now.
+file(GLOB MADLIB_STALE_MODS ${CMAKE_CURRENT_SOURCE_DIR}/*.mod
+                            ${CMAKE_CURRENT_SOURCE_DIR}/turbogap/*.mod)
+if(MADLIB_STALE_MODS)
+  message(FATAL_ERROR
+    "Fortran modules are sitting beside the sources in ${CMAKE_CURRENT_SOURCE_DIR} "
+    "and gfortran would prefer them to this build's own. Run: make -C "
+    "${CMAKE_CURRENT_SOURCE_DIR} clean")
+endif()
+
 if(MADLIB_ENABLE_GPU)
   include(madlib-gpu.cmake)
 else()

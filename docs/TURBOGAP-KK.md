@@ -750,3 +750,36 @@ host" from "it quietly fell back". Three checks, in the same session:
 
 The `pairgpu` leg also forces a twelve-batch split and fails if the run reports
 no batches at all, so it cannot pass by testing the one-batch case twice.
+
+### The trap the clean room caught: modules beside the sources
+
+The device build worked from a synced working tree and **failed from a clean
+clone**, with 32 errors that all look like a broken shim:
+
+    madlib_soap_gpu.f90:293: Error: Type mismatch in argument 'alpha_max';
+                                    passed TYPE(c_ptr) to INTEGER(4)
+    madlib_soap_gpu.f90:284: Error: Rank mismatch in argument 'l_max'
+    ...                     Error: More actual than formal arguments
+
+Those are the arguments landing one slot early: the shim was compiled against
+the **34-argument CPU** `get_soap` rather than the 48-argument GPU one. But the
+target's source list holds only `soap_turbo_gpu/src/soap_turbo.f90`, and
+`build-madlib/mod/soap_turbo_desc.mod` was the GPU one — byte-identical to the
+standalone build's, which compiles the same file without complaint.
+
+**gfortran searches the directory of the file it is compiling for `.mod`
+files.** `make -C lib/madlib` wrote the CPU modules there; a cmake build of
+`lib/madlib/madlib_soap_gpu.f90` then preferred `lib/madlib/soap_turbo_desc.mod`
+over its own. Hiding the module in the `-I` directory did not change the error
+at all — which is what finally located it: the module being read was never the
+one on the command line.
+
+Two things follow, and both are now in the tree. The standalone `Makefile`
+compiles with `-Jmod` so it never writes beside a source again. And
+`lib/madlib/CMakeLists.txt` refuses to configure when it finds a `.mod` there,
+naming `make clean` — because a tree that predates the Makefile change still has
+them, and the silent version of this failure is worse than the loud one.
+
+This is the same "one soap_turbo per binary" constraint as the link-level trap
+in §4, one level lower down: at the **module** level it does not even need two
+object files, only two files with the same name on a search path nobody passed.

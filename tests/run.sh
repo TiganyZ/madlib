@@ -62,7 +62,7 @@ fortran_check() {
     echo "    SKIP: no gfortran"
     return
   fi
-  if ! gfortran -O2 -I "$lib" "$stem.f90" -o "/tmp/mad_$stem" \
+  if ! gfortran -O2 -I "$lib/mod" "$stem.f90" -o "/tmp/mad_$stem" \
         "$lib/libmadlib.a" -llapack -lblas 2>"/tmp/mad_$stem.log"; then
     sed 's/^/     /' "/tmp/mad_$stem.log" | tail -5
     bad "$stem did not build"
@@ -79,7 +79,7 @@ build_cpu_and_gpu() {
   local stem=$1 hostbin=$2 devbin=$3
   local lib=../lib/madlib
   local g=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
-  gfortran -O2 -cpp -ffree-line-length-none -I "$lib" "$stem.f90" -o "$hostbin" \
+  gfortran -O2 -cpp -ffree-line-length-none -I "$lib/mod" "$stem.f90" -o "$hostbin" \
       "$lib/libmadlib.a" -llapack -lblas 2>/tmp/mad_gpubuild.log || return 1
   ${FC:-mpif90} -O2 -cpp -ffree-line-length-none -fallow-argument-mismatch \
       -DMADLIB_GPU_DESC -I "$g" "$stem.f90" -o "$devbin" "$g"/*.o "$g"/cu/*.o \
@@ -452,7 +452,7 @@ soapgpu)
     # an entry point and cannot be linked together. Same source, same
     # configuration; the only difference is which soap_turbo answered.
     rm -f /tmp/mad_desc_cpu.dat /tmp/mad_desc_gpu.dat
-    gfortran -O2 -cpp -ffree-line-length-none -I "$LIB" soapdescdump.f90 \
+    gfortran -O2 -cpp -ffree-line-length-none -I "$LIB/mod" soapdescdump.f90 \
         -o /tmp/mad_desc_cpu "$LIB/libmadlib.a" -llapack -lblas 2>/tmp/mad_desc.log \
       && ${FC:-mpif90} -O2 -cpp -ffree-line-length-none -fallow-argument-mismatch \
         -DMADLIB_GPU_DESC -I "$GPUOBJ" soapdescdump.f90 -o /tmp/mad_desc_gpu \
@@ -527,7 +527,7 @@ soapswap)
     # change to get the device descriptor.
     rm -f /tmp/mad_lp_cpu.dat /tmp/mad_lp_gpu.dat
     sw_bad=0
-    gfortran -O2 -cpp -ffree-line-length-none -I "$LIB" soaplocalpropdump.f90 \
+    gfortran -O2 -cpp -ffree-line-length-none -I "$LIB/mod" soaplocalpropdump.f90 \
         -o /tmp/mad_lp_cpu "$LIB/libmadlib.a" -llapack -lblas 2>/tmp/mad_sw.log \
       && ${FC:-mpif90} -O2 -cpp -ffree-line-length-none -fallow-argument-mismatch \
         -I "$GPUOBJ" soaplocalpropdump.f90 -o /tmp/mad_lp_gpu "$GPUOBJ"/*.o "$GPUOBJ"/cu/*.o \

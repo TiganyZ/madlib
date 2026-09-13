@@ -42,10 +42,17 @@ OBJ = $(SRC:.f90=.o)
 libmadlib.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
+# -Jmod, not -J. -- the modules must not land beside the sources. gfortran
+# searches the directory of the file it is compiling for .mod files, so a
+# cmake build of lib/madlib/madlib_soap_gpu.f90 would find the CPU
+# soap_turbo_desc.mod this rule had left there and resolve get_soap to the
+# 34-argument CPU signature instead of the 48-argument GPU one. It reads as a
+# broken shim, not a stale artefact.
 %.o: %.f90
-	$(FC) $(FFLAGS) -J. -c $< -o $@
+	@mkdir -p mod
+	$(FC) $(FFLAGS) -Jmod -c $< -o $@
 
 clean:
-	rm -f $(OBJ) *.mod turbogap/*.mod libmadlib.a
+	rm -rf $(OBJ) mod *.mod turbogap/*.mod libmadlib.a
 
 .PHONY: clean
