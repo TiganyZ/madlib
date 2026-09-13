@@ -180,6 +180,14 @@ page for more info.
 package and the package supplying its descriptor.  Without them the styles still exist and report
 what to build.
 
+That Fortran backend has two implementations, and a build gets one of them:
+adding ``-D MADLIB_ENABLE_GPU=on`` computes the SOAP descriptor on the device
+instead of the host, from an external TurboGAP checkout.  The style itself is
+unchanged, and so is the answer -- the sparse-GP prediction stays on the host,
+which is what keeps *zero_trunc* clamping (core electron binding energies and
+Hirshfeld volumes both set it) identical between the two.  See the MADLIB
+repository's ``docs/TURBOGAP-KK.md``.
+
 For *mad/property/coord*, *mad/property/python* and *mad/property/turbogap*,
 the cutoff plus the
 neighbor skin must be within the communication cutoff; when it is not, the
