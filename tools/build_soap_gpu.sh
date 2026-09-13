@@ -35,7 +35,8 @@ FFLAGS="-O2 -fPIC -cpp -ffree-line-length-none -fallow-argument-mismatch -D_GPU 
 # alone would need.
 FORTRAN="kinds fortran_cuda_interfaces soap_turbo_functions soap_turbo_radial
          soap_turbo_angular soap_turbo_compress soap_turbo
-         elements topology splines types gpu_context_gpu local_properties gap"
+         elements topology splines types gpu_context_gpu local_properties gap
+         soap_turbo_compress_cpu madlib_soap_dims"
 
 # orthonormalization_kernels.cc is not built, and neither does TurboGAP build
 # it: its own Makefile has it commented out of SRC_CC, "deliberately disabled,
@@ -72,7 +73,13 @@ gather_sources() {
              gpu_context_gpu local_properties gap; do
         cp "$src/$f.f90" "$out/"
     done
-    cp "$MADLIB/lib/madlib/madlib_soap_gpu.f90" "$out/"
+    # The CPU soap_turbo's compression module under a name that does not
+    # collide with the GPU fork's. The two declare DIFFERENT module names --
+    # soap_turbo_compress_module against soap_turbo_compress -- so both fit in
+    # one binary, which is what lets madlib_soap_dims size a descriptor the
+    # same way in either build. Only the CPU one knows P_transformation.
+    cp "$MADLIB/lib/madlib/turbogap/soap_turbo_compress.f90" "$out/soap_turbo_compress_cpu.f90"
+    cp "$MADLIB/lib/madlib/madlib_soap_dims.f90" "$MADLIB/lib/madlib/madlib_soap_gpu.f90" "$out/"
 }
 
 # $1 source file, $2 outdir, $3 C++ standard. .cc needs c++20 for <numbers>.

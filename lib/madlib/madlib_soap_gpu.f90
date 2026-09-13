@@ -23,6 +23,7 @@ module madlib_soap_gpu
 
    use iso_c_binding
    use F_B_C
+   use madlib_soap_dims, only: c_to_f_string
    use soap_turbo_desc, only: get_soap
    use gap, only: get_soap_energy_and_forces, soap_backend_begin, soap_backend_end
    use local_prop, only: local_property_predict
@@ -221,8 +222,8 @@ contains
       character(len=32) :: bas, smode
 
       call madlib_soap_gpu_init()
-      bas = c_to_f_string_gpu(basis)
-      smode = c_to_f_string_gpu(scaling_mode)
+      bas = c_to_f_string(basis)
+      smode = c_to_f_string(scaling_mode)
       time_get_soap = 0.d0
 
       call build_mask_gpu(n_sites, n_pairs, n_species, n_neigh, species_idx, &
@@ -670,16 +671,5 @@ contains
          k = k + n_neigh(s)
       end do
    end subroutine build_mask_gpu
-
-   function c_to_f_string_gpu(s) result(f)
-      character(kind=c_char), intent(in) :: s(*)
-      character(len=32) :: f
-      integer :: i
-      f = " "
-      do i = 1, 32
-         if (s(i) == c_null_char) exit
-         f(i:i) = s(i)
-      end do
-   end function c_to_f_string_gpu
 
 end module madlib_soap_gpu

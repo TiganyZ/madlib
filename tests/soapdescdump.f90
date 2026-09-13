@@ -59,8 +59,8 @@ program soapdescdump
    p_i = 0; p_j = 0; p_el = 0.d0
 
    ! Uncompressed: n_max(n_max+1)/2 * (l_max+1), with n_max = sum(alpha_max).
-   ! Computed rather than asked for, because madlib_soap_dim lives in the CPU
-   ! shim and linking that would pull in the CPU soap_turbo beside the GPU one.
+   ! Computed rather than asked for, so this driver states the size it expects
+   ! instead of agreeing with the library about it.
    dim = sum(alpha_max)*(sum(alpha_max) + 1)/2*(l_max + 1)
    if (do_der /= 0) then
       allocate (der(3*dim*n_pairs))

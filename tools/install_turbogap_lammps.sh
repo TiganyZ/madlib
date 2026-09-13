@@ -34,6 +34,17 @@ KOKKOS_BACKEND=${KOKKOS_BACKEND:-CUDA}
 # recent.
 HOST_CXX=${HOST_CXX:-}
 
+# SOAP on the device. MADLIB_GPU_SOAP=on swaps the vendored CPU soap_turbo for
+# TurboGAP's GPU one, which has to come from a TurboGAP checkout: it is a
+# directory tree of Fortran and CUDA rather than the twelve files MADLIB
+# vendors, and it is compiled in place. Needs GPU_ARCH, and MPI, because
+# gap.f90's device half opens with an unconditional `use mpi`.
+#
+# The two soap_turbo forks declare the same module and entry names, so a binary
+# holds one of them. This is a build-time choice, not a runtime one.
+MADLIB_GPU_SOAP=${MADLIB_GPU_SOAP:-off}
+TURBOGAP_SRC=${TURBOGAP_SRC:-}
+
 # Which CUDA to build against. "auto" takes the newest /usr/local/cuda-* -- the
 # one on PATH is chosen by a system alternatives link and is often not it, and
 # Kokkos refuses to build C++20 with nvcc older than 12.2, so the difference
@@ -67,6 +78,16 @@ stage_deps() {
     step "$(g++ --version | head -1)"
     step "$(gfortran --version | head -1)"
     [ -n "$HOST_CXX" ] && step "host compiler for nvcc: $HOST_CXX"
+
+    if [ "$MADLIB_GPU_SOAP" = on ]; then
+        [ -n "$GPU_ARCH" ] || die "MADLIB_GPU_SOAP needs GPU_ARCH"
+        [ -n "$TURBOGAP_SRC" ] || die "MADLIB_GPU_SOAP needs TURBOGAP_SRC=<turbogap>/src"
+        [ -d "$TURBOGAP_SRC/soap_turbo_gpu/src" ] \
+            || die "$TURBOGAP_SRC has no soap_turbo_gpu/src -- is that TurboGAP's src/?"
+        [ -e "$TURBOGAP_SRC/hop/hop" ] \
+            || die "$TURBOGAP_SRC/hop is empty; run git submodule update --init in TurboGAP"
+        step "device SOAP from $TURBOGAP_SRC"
+    fi
 
     if [ -n "$GPU_ARCH" ]; then
         select_cuda
@@ -134,6 +155,12 @@ CU
         90)    echo HOPPER90 ;;
         *)     die "could not identify the GPU (compute capability '$cc'); set GPU_ARCH by hand" ;;
     esac
+}
+
+# AMPERE86 -> 86. Kokkos names an architecture, CUDA numbers it, and the digits
+# are the same in both.
+kokkos_arch_to_cc() {
+    echo "$1" | sed 's/[^0-9]//g'
 }
 
 stage_python() {
@@ -274,6 +301,10 @@ cmake_flags() {
     echo "-D PKG_ML-QUIP=on -D QUIP_LIBRARY=$PREFIX/QUIP/quiplib/libquip.a"
     echo "-D PKG_PYTHON=on"
     echo "-D PKG_MADLIB=on -D MADLIB_ENABLE_TURBOGAP=on -D MADLIB_ENABLE_PYTHON=on"
+    if [ "$MADLIB_GPU_SOAP" = on ]; then
+        echo "-D MADLIB_ENABLE_GPU=on -D MADLIB_TURBOGAP_SRC=$TURBOGAP_SRC"
+        echo "-D MADLIB_GPU_ARCH=$(kokkos_arch_to_cc "$GPU_ARCH")"
+    fi
     echo "-D Python_EXECUTABLE=$PREFIX/venv/bin/python"
     if [ -n "$GPU_ARCH" ]; then
         echo "-D PKG_KOKKOS=on -D Kokkos_ENABLE_$KOKKOS_BACKEND=on -D Kokkos_ARCH_$GPU_ARCH=on"
@@ -344,8 +375,9 @@ stage_test() {
 main() {
     local stages=${*:-$ALL_STAGES}
     ensure_dir "$PREFIX"
-    printf 'MADLIB + LAMMPS install\n  prefix: %s\n  stages: %s\n  gpu:    %s\n' \
-        "$PREFIX" "$stages" "${GPU_ARCH:-none (cpu build)}"
+    printf 'MADLIB + LAMMPS install\n  prefix: %s\n  stages: %s\n  gpu:    %s\n  soap:   %s\n' \
+        "$PREFIX" "$stages" "${GPU_ARCH:-none (cpu build)}" \
+        "$([ "$MADLIB_GPU_SOAP" = on ] && echo device || echo host)"
     for s in $stages; do
         case $s in
             deps)      stage_deps ;;

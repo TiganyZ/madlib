@@ -97,7 +97,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("data")
     p.add_argument("extra", help="file holding the compute/fix lines under test")
-    p.add_argument("--lmp", default="/home/tigany/Documents/lammps/lammps/build/lmp")
+    p.add_argument("--lmp", default=os.environ.get("LMP", "../../lammps/lammps/build/lmp"))
     p.add_argument("--paircut", type=float, default=6.5)
     p.add_argument("--atoms", type=int, default=5)
     p.add_argument("--hs", default="1e-3,3e-4,1e-4,3e-5")

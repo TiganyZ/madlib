@@ -27,6 +27,7 @@ SRC = turbogap/kinds.f90 \
       turbogap/types.f90 \
       turbogap/local_properties.f90 \
       turbogap/gap.f90 \
+      madlib_soap_dims.f90 \
       madlib_soap.f90 \
       madlib_gap.f90
 

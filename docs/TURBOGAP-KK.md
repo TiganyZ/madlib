@@ -608,3 +608,88 @@ Build under `/tmp`, not in `$HOME`. The home filesystem on `alt` is at
 checkout is ~15k files before anything is compiled. A previous attempt there
 died with "Disk quota exceeded" while cloning, which reads as a space problem
 and is not one. `/tmp` has its own inode pool, over a million free.
+
+## 11. Building `lmp` against the device SOAP backend
+
+Sections 7 and 8 verified the device path through standalone drivers. This is
+what makes `lmp` itself use it.
+
+```sh
+cmake -S cmake -B build \
+  -D PKG_MADLIB=on -D MADLIB_ENABLE_TURBOGAP=on \
+  -D MADLIB_ENABLE_GPU=on \
+  -D MADLIB_TURBOGAP_SRC=<turbogap>/src \
+  -D MADLIB_GPU_ARCH=86 \
+  -D CUDAToolkit_ROOT=/usr/local/cuda-13.4
+```
+
+`lib/madlib/madlib-gpu.cmake` replaces the vendored source list with TurboGAP's
+GPU one, compiled **in place** from that checkout: five Fortran files from
+`soap_turbo_gpu/src`, nine more from `src`, and fifteen CUDA translation units
+from `src/gpu`. Nothing is copied into MADLIB.
+
+**`src/MADLIB` does not change.** Both `madlib_soap.f90` and
+`madlib_soap_gpu.f90` define `madlib_local_property`, which is the whole SOAP
+term for `pair_style turbogap` — the sparse-GP prediction that `pair_turbogap.cpp`
+calls once per descriptor block. Swapping the library swaps the backend, and
+the pair style cannot tell.
+
+That is also the constraint: the two soap_turbo forks declare the **same module
+and the same entry name**, with 34 and 48 arguments, so a binary holds one of
+them. This is a build-time choice, not a runtime one, which is how LAMMPS
+treats KOKKOS anyway.
+
+### What had to be split
+
+`madlib_soap_dim` and `madlib_compress_indices` were in `madlib_soap.f90`,
+which a GPU build cannot compile — it uses the 34-argument `get_soap`. They are
+now in `madlib_soap_dims.f90`, which both builds compile, and which keeps using
+the **CPU** compression module in both.
+
+That is not a workaround. The two forks diverge here for real:
+
+| | module | `get_compress_indices` |
+|---|---|---|
+| `soap_turbo/src` | `soap_turbo_compress_module` | 9 args, returns `P_i, P_j, P_el` |
+| `soap_turbo_gpu/src` | `soap_turbo_compress` | 6 args, returns an index list |
+
+Only the CPU one knows `P_transformation`. Because the **module names differ**,
+both fit in one binary, so sizing and index expansion always come from the CPU
+one and the device descriptor path uses the `P_j` column as its index list. A
+`P_transformation` potential still has no device path — TurboGAP aborts on one
+too (`read_files.f90:6370`).
+
+### Three traps in the cmake, all silent-ish
+
+**cmake picks the wrong nvcc.** On a machine with a distribution CUDA in
+`/usr/bin` and a newer one under `/usr/local`, cmake takes `/usr/bin/nvcc` even
+with the newer first on `PATH`. nvcc 12 then calls the **ptxas it finds on
+PATH**, which is 13, and the error is
+
+    ptxas fatal : Value 'sm_52' is not defined for option 'gpu-name'
+
+— sm_52 being nvcc 12's default arch, dropped in CUDA 13. It reads as a missing
+architecture; it is two toolkits in one compile. `madlib-gpu.cmake` sets
+`CMAKE_CUDA_COMPILER` from `CUDAToolkit_ROOT` and then asserts
+`CMAKE_CUDA_COMPILER_VERSION` equals `CUDAToolkit_VERSION`. Same family as §9.
+
+**`CMAKE_CUDA_ARCHITECTURES` must be set before `enable_language(CUDA)`**, not
+after. cmake compiles a probe to identify the compiler and defaults it to
+`compute_52`, so the identification step fails on CUDA 13 before any of our
+sources are seen.
+
+**The Fortran module scanner does not run the preprocessor by default.**
+`gap.f90`'s `use gpu_context` sits inside `#ifdef _GPU`, so a scanner that skips
+the conditional misses the edge and orders `gap.f90` before `gpu_context_gpu.f90`
+— on a source list that is already in dependency order. The symptom is
+`Cannot open module file 'gpu_context.mod'`. The fix is `Fortran_PREPROCESS ON`
+plus `_GPU` as a compile **definition** rather than a `-D` in
+`target_compile_options`, so the scanner sees it too.
+
+### C++20 everywhere
+
+`tools/build_soap_gpu.sh` compiles `.cu` at C++17 and `.cc` at C++20, following
+TurboGAP's Makefile. Checked: all fourteen `.cu` compile at C++20 as well, so
+the cmake path uses one standard and copies the `.cc` in as `.cu` rather than
+carrying per-source language and `-x cu` properties whose flag order against the
+standard flag is not guaranteed.

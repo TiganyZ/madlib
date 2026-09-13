@@ -6,6 +6,7 @@
 #   ./run.sh pdf xrd    a subset
 #
 # LMP        binary under test   (default ../../lammps/build/lmp)
+# LMP_GPU    a second lmp built with -D MADLIB_ENABLE_GPU=on, for the pairgpu leg
 # PYTHON     interpreter         (default python3)
 # RANKS      ranks for the mpi leg (default 4)
 
@@ -29,12 +30,11 @@ RANKS=${RANKS:-4}
 # after step 0. Turning the single-copy mechanism off costs a little bandwidth
 # and makes it work.
 MPIRUN_EXTRA=${MPIRUN_EXTRA:---mca btl_vader_single_copy_mechanism none}
-XYZ=/home/tigany/test/turbogap_tests/xrd_mad/atoms.xyz
-
-# Fitted potentials live in the turbogap_tests data repository, not here: they
-# are 24 MB and change on a different cadence from this code. Legs that need
-# them skip when they are absent.
+# Frames and fitted potentials live in the turbogap_tests data repository, not
+# here: they are tens of megabytes and change on a different cadence from this
+# code. Legs that need them skip when they are absent.
 DATA_ROOT=${MADLIB_DATA_ROOT:-$HOME/test/turbogap_tests}
+XYZ=$DATA_ROOT/xrd_mad/atoms.xyz
 GAP_DIR=$DATA_ROOT/xrd_mad/gap_files
 # -e is false for a dangling symlink, and plain ln then fails against the name
 # that is already there -- which leaves the broken link in place and every gap
@@ -114,7 +114,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -317,7 +317,7 @@ try:
     from ase.io import read
 except ImportError:
     print("    SKIP: quippy not installed, cannot cross-check"); sys.exit(0)
-at = read("/home/tigany/test/turbogap_tests/xrd_mad/atoms.xyz")
+at = read(os.environ["MADLIB_XYZ"])
 at.calc = Potential(param_filename="data/gap_files/CO.xml")
 ref_e, ref_f = at.get_potential_energy(), at.get_forces()
 rows = [l.split() for l in open("quip_forces.dump").read().split("ITEM: ATOMS")[-1].split("\n")[1:]
@@ -630,6 +630,33 @@ pairmd)
     ok "five steps of NVE agree with newton on"
   else
     bad "the styles diverge under MD"
+  fi
+  ;;
+
+pairgpu)
+  leg "SOAP on the device, through lmp itself"
+  # The cmake backend switch, end to end. Two binaries differing only in
+  # -D MADLIB_ENABLE_GPU, five steps of the same NVE, compared against each
+  # other in this session -- never against a stored dump, because the device
+  # does not reproduce itself run to run.
+  if [ -z "${LMP_GPU:-}" ]; then
+    echo "    SKIP: set LMP_GPU to an lmp built with -D MADLIB_ENABLE_GPU=on"
+  else
+    L=/tmp/madlib_pairgpu
+    rm -f md_ref.dump md_host.dump md_gpu.dump
+    $LMP -in in.md_ref -log none >${L}_host.log 2>&1; hrc=$?
+    mv -f md_ref.dump md_host.dump 2>/dev/null
+    $LMP_GPU -in in.md_ref -log none >${L}_dev.log 2>&1; drc=$?
+    mv -f md_ref.dump md_gpu.dump 2>/dev/null
+    if [ $hrc -ne 0 ] || [ $drc -ne 0 ] || ! have md_host.dump || ! have md_gpu.dump; then
+      tail -8 ${L}_dev.log | sed 's/^/     /'
+      bad "one of the two backends did not finish five steps"
+    elif $PYTHON compare_pair_md.py md_host.dump ${L}_host.log \
+                                    device md_gpu.dump ${L}_dev.log; then
+      ok "the device backend gives the host's trajectory"
+    else
+      bad "the device backend disagrees with the host"
+    fi
   fi
   ;;
 

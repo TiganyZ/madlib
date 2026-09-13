@@ -13,6 +13,14 @@
 set(MADLIB_ENABLE_TURBOGAP OFF CACHE BOOL "Build the soap_turbo local-property backend")
 set(MADLIB_ENABLE_PYTHON OFF CACHE BOOL "Build the embedded-Python local-property backend")
 
+# The soap_turbo backend has two implementations of one interface, and a binary
+# gets one of them: TurboGAP's CPU and GPU soap_turbo declare the same module
+# and entry names, so they cannot be linked together and cannot be selected at
+# runtime. MADLIB_ENABLE_GPU picks the device one, which needs an external
+# TurboGAP checkout (MADLIB_TURBOGAP_SRC) and MADLIB_GPU_ARCH; the options are
+# declared in lib/madlib/CMakeLists.txt. Nothing in src/MADLIB changes -- both
+# export the same C entry points.
+
 # The ML-IAP backend needs no option: it compiles when ML-IAP is enabled, since
 # that is the only thing it depends on.
 if(PKG_ML-IAP)
@@ -53,7 +61,14 @@ if(MADLIB_ENABLE_TURBOGAP)
   add_subdirectory(${MADLIB_LIB_DIR} ${CMAKE_BINARY_DIR}/build-madlib)
   target_link_libraries(lammps PRIVATE madlib)
   target_compile_definitions(lammps PRIVATE -DMADLIB_TURBOGAP)
-  message(STATUS "MADLIB: soap_turbo backend enabled")
+  if(MADLIB_ENABLE_GPU)
+    message(STATUS "MADLIB: soap_turbo backend enabled, SOAP on the device")
+  else()
+    message(STATUS "MADLIB: soap_turbo backend enabled, SOAP on the host")
+  endif()
 else()
   message(STATUS "MADLIB: soap_turbo backend off (-D MADLIB_ENABLE_TURBOGAP=on to build it)")
+  if(MADLIB_ENABLE_GPU)
+    message(WARNING "MADLIB_ENABLE_GPU has no effect without MADLIB_ENABLE_TURBOGAP")
+  endif()
 endif()

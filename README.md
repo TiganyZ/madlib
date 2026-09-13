@@ -390,6 +390,22 @@ cmake ../cmake -D PKG_MADLIB=on -D PKG_MC=on -D BUILD_MPI=on \
                -D MADLIB_ENABLE_TURBOGAP=on
 ```
 
+To compute SOAP on the GPU instead, add
+
+```sh
+               -D MADLIB_ENABLE_GPU=on \
+               -D MADLIB_TURBOGAP_SRC=/path/to/turbogap/src \
+               -D MADLIB_GPU_ARCH=86 \
+               -D CUDAToolkit_ROOT=/usr/local/cuda-13.4
+```
+
+which builds `libmadlib` against TurboGAP's GPU `soap_turbo` and its CUDA
+kernels, compiled in place from that checkout rather than vendored. It needs
+MPI and it needs `git submodule update --init` to have been run in TurboGAP
+(for `hop`). `pair_style turbogap` is unchanged either way -- the two backends
+export the same entry points -- so this is a build-time choice, not a runtime
+one. See `docs/TURBOGAP-KK.md` §11.
+
 ### Verifying against a real potential
 
 Every other leg runs on `pair_style zero`, which isolates the bias but says
