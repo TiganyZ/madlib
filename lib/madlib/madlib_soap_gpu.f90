@@ -579,21 +579,19 @@ contains
       deallocate (soap, soap_cart_der)
    end subroutine one_batch
 
-!  A per-atom property with the descriptor computed on the device.
+!  A per-atom property, computed on the device.
 !
 !  Same C symbol and same argument list as the host madlib_local_property, so a
 !  caller does not choose between them -- the build does. Exactly one of the two
 !  is compiled, which is forced anyway: the CPU and GPU soap_turbo share a
 !  module name and cannot both be linked.
 !
-!  The PREDICTION deliberately runs on the host, through the same
-!  local_property_predict the CPU path uses, even though gpu_local_property_predict
-!  exists. That routine takes no zero_trunc argument and does not clamp, while
-!  the host one floors negative values and zeroes their gradients. Core electron
-!  binding energies and Hirshfeld volumes both set zero_trunc, so the device
-!  predictor would quietly return different numbers for exactly the quantities
-!  this is for. The descriptor is the expensive part and it is on the device;
-!  the contraction that follows is not worth a silent change in physics.
+!  Descriptor and prediction both run on the device. The prediction only
+!  became safe to move once gpu_local_property_predict learned zero_trunc:
+!  without it the device returned unclamped values for exactly the quantities
+!  this is for -- core electron binding energies and Hirshfeld volumes both set
+!  it. MADLIB_SOAP_HOST_PREDICT=1 puts the contraction back on the host, which
+!  is how the two are compared in one process.
    subroutine madlib_local_property_gpu(n_sites, n_pairs, n_species, n_neigh, species_idx, &
                                         rjs, thetas, phis, alpha_max, l_max, rcut_hard, &
                                         rcut_soft, nf, global_scaling, atom_sigma_r, &
