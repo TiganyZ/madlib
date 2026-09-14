@@ -342,7 +342,8 @@ quip)
     echo "    SKIP: no GAP potential (set MADLIB_DATA_ROOT)"
   else
     $LMP -in in.quip -log none >/dev/null 2>&1
-    $PYTHON - <<'PY'
+    MADLIB_XYZ=$XYZ $PYTHON - <<'PY'
+import os
 import sys
 import numpy as np
 try:
