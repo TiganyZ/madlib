@@ -625,6 +625,16 @@ cmake -S cmake -B build \
   -D CUDAToolkit_ROOT=/usr/local/cuda-13.4
 ```
 
+**Which TurboGAP.** Not any checkout: the device path needs `zero_trunc` on
+`gpu_local_property_predict`, which arrived on the `feature/gpu_zero_trunc`
+branch (`629484b`, with `8dcee38` on top of it). Without it the build succeeds,
+runs, and returns core electron binding energies and Hirshfeld volumes that
+differ from the host backend — so `madlib-gpu.cmake` greps for the kernel and
+refuses to configure rather than let that happen. **That branch is not on any
+public remote**: TurboGAP's `origin` is a local directory on `alt`, so today
+this is buildable only there, by its author. Publishing it is the prerequisite
+for anyone else.
+
 `lib/madlib/madlib-gpu.cmake` replaces the vendored source list with TurboGAP's
 GPU one, compiled **in place** from that checkout: five Fortran files from
 `soap_turbo_gpu/src`, nine more from `src`, and fifteen CUDA translation units

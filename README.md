@@ -401,10 +401,17 @@ To compute SOAP on the GPU instead, add
 
 which builds `libmadlib` against TurboGAP's GPU `soap_turbo` and its CUDA
 kernels, compiled in place from that checkout rather than vendored. It needs
-MPI and it needs `git submodule update --init` to have been run in TurboGAP
-(for `hop`). `pair_style turbogap` is unchanged either way -- the two backends
-export the same entry points -- so this is a build-time choice, not a runtime
-one. See `docs/TURBOGAP-KK.md` §11.
+MPI, it needs `git submodule update --init` to have been run in TurboGAP (for
+`hop`), and it needs a TurboGAP whose `gpu_local_property_predict` takes
+`zero_trunc` -- currently the `feature/gpu_zero_trunc` branch, which is not yet
+on a public remote. cmake checks for it and refuses rather than quietly
+returning different local properties from the host backend.
+
+`pair_style turbogap` is unchanged either way -- the two backends export the
+same entry points -- so this is a build-time choice, not a runtime one. The
+descriptor and the sparse-GP contraction both run on the device; setting
+`MADLIB_SOAP_HOST_PREDICT=1` moves the contraction back to the host, which is
+how the two are compared inside one process. See `docs/TURBOGAP-KK.md` §11.
 
 ### Verifying against a real potential
 
