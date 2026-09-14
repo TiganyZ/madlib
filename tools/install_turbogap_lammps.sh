@@ -132,6 +132,11 @@ select_cuda() {
     if [ -x "$CUDA_HOME/bin/nvcc" ]; then
         export PATH="$CUDA_HOME/bin:$PATH"
         export CUDA_HOME
+        # nvcc_wrapper takes nvcc from $CUDA_ROOT/bin, falling back to whatever
+        # PATH offers. A distro /usr/bin/nvcc is often several releases behind
+        # and rejects fmt's literal operator template, so the build fails in a
+        # LAMMPS header with nothing to say it used the wrong compiler.
+        export CUDA_ROOT="$CUDA_HOME"
         hash -r
     fi
 }

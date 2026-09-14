@@ -76,6 +76,12 @@ ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char *
   // Py_Finalize.
   if (!Py_IsInitialized()) Py_Initialize();
 
+  // The model file normally sits beside the input deck, but an embedded
+  // interpreter only gets the working directory on sys.path when PYTHONPATH is
+  // unset -- so setting PYTHONPATH to reach numpy loses the model.
+  PyRun_SimpleString("import os, sys\n"
+                     "if os.getcwd() not in sys.path: sys.path.insert(0, os.getcwd())\n");
+
   PyObject *mod = PyImport_ImportModule(module_name.c_str());
   if (!mod) fail("could not import the module");
   py_module = mod;

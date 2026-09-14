@@ -303,7 +303,7 @@ torch)
   elif ! $PYTHON -c "import torch" 2>/dev/null; then
     echo "    SKIP: torch not installed"
   else
-    export PYTHONPATH=$PWD
+    export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
     $LMP -in in.torch_ref -log none >/dev/null 2>&1 && mv -f torch_q.dump coord_q.dump
     $LMP -in in.torch -log none >/dev/null 2>&1
     $PYTHON - <<'PY'
