@@ -782,6 +782,14 @@ contains
                                       int(np, c_int), l_index_d, cublas_handle, gpu_stream, &
                                       zero_trunc)
 
+!     gpu_local_property_predict copies its results back with cpy_dtoh, which
+!     is hipMemcpyAsync on gpu_stream, and returns without waiting. Reading lp
+!     here and freeing it below would both race that copy. It happens not to,
+!     because a device-to-host copy into pageable memory completes before the
+!     runtime returns -- but that is a property of the runtime, not a promise,
+!     and the deallocate hands the pages back.
+      call gpu_stream_sync(gpu_stream)
+
       v(1:ns) = lp(1:ns)
       if (do_der) v_der(1:3, 1:np) = lp_der(1:3, 1:np)
 
