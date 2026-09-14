@@ -138,7 +138,14 @@ target_compile_options(madlib PRIVATE
   $<$<COMPILE_LANGUAGE:Fortran>:-ffree-line-length-none>
   $<$<COMPILE_LANGUAGE:Fortran>:-fallow-argument-mismatch>)
 
-target_include_directories(madlib PRIVATE ${TG}/gpu ${TG}/hop ${TG}/hop/source/hip)
+# MADLIB_GPU_EXTRA_INCLUDE is for headers the toolkit expects the system to
+# have and a machine does not. On CSC's Roihu, cudaGL.h includes <GL/gl.h>,
+# hop's runtime shim includes cudaGL.h whether or not anything draws, and the
+# GPU nodes ship no GL headers -- so every .cu fails on a file that has nothing
+# to do with the kernel. TurboGAP carries a stub of four typedefs at
+# makefiles/roihu-gl-stub for its own build; point this at the same directory.
+target_include_directories(madlib PRIVATE
+  ${TG}/gpu ${TG}/hop ${TG}/hop/source/hip ${MADLIB_GPU_EXTRA_INCLUDE})
 target_link_libraries(madlib PUBLIC CUDA::cudart CUDA::cublas MPI::MPI_Fortran)
 
 message(STATUS "MADLIB: device SOAP from ${TG} (sm_${CMAKE_CUDA_ARCHITECTURES})")

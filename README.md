@@ -407,6 +407,12 @@ MPI, it needs `git submodule update --init` to have been run in TurboGAP (for
 on a public remote. cmake checks for it and refuses rather than quietly
 returning different local properties from the host backend.
 
+On a machine whose GPU nodes ship no OpenGL headers -- CSC's Roihu among them --
+add `-D MADLIB_GPU_EXTRA_INCLUDE=<turbogap>/makefiles/roihu-gl-stub`. CUDA's
+`cudaGL.h` includes `<GL/gl.h>`, hop's runtime shim includes `cudaGL.h` whether
+or not anything draws, and without the stub every `.cu` fails on a header that
+has nothing to do with the kernel.
+
 `pair_style turbogap` is unchanged either way -- the two backends export the
 same entry points -- so this is a build-time choice, not a runtime one. The
 descriptor and the sparse-GP contraction both run on the device; setting
