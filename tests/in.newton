@@ -1,0 +1,13 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          ${nt}
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      turbogap e0 C -.16138053 e0 O 0.0
+pair_coeff      * * data/gap_files/CO.gap C O
+neighbor        0.5 bin
+thermo_style    custom step pe pxx pyy pzz pxy pxz pyz
+thermo_modify   format float %.12g
+run 0

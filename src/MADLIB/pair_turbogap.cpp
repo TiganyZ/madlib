@@ -84,6 +84,11 @@ PairTurboGAP::PairTurboGAP(LAMMPS *lmp) : Pair(lmp)
   one_coeff = 1;           // pair_coeff * * only
   manybody_flag = 1;       // SOAP and 3b are not pairwise
   centroidstressflag = CENTROID_NOTAVAIL;
+  // This style computes its own global virial from r.f. Saying so keeps
+  // vflag_global set under newton on as well as newton off, which is the only
+  // flag the compute below can test; LAMMPS otherwise routes the two modes
+  // through vflag_fdotr and vflag_global separately.
+  no_virial_fdotr_compute = 1;
   comm_reverse = 3;    // a force vector per ghost; see pack_reverse_comm
   report_terms = (getenv("TURBOGAP_TERMS") != nullptr) ? 1 : 0;
   profile = (getenv("TURBOGAP_PROFILE") != nullptr) ? 1 : 0;
@@ -606,7 +611,13 @@ void PairTurboGAP::compute(int eflag, int vflag)
   // Before the fold, not after: virial_fdotr_compute sums r.f over local AND
   // ghost atoms, so it wants the ghost forces still sitting where they were
   // computed.
-  if (vflag_fdotr) virial_fdotr_compute();
+  //
+  // On vflag_global rather than vflag_fdotr. With newton off -- which the
+  // KOKKOS package selects by default -- LAMMPS sets virial_style to
+  // VIRIAL_PAIR and clears vflag_fdotr, expecting a per-pair tally that this
+  // style does not have. r.f is right in both newton modes, and without this
+  // the pressure is silently zero rather than wrong.
+  if (vflag_global) virial_fdotr_compute();
 
   // With newton pair on, LAMMPS folds the ghosts itself after compute and
   // doing it here too would count them twice.

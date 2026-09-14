@@ -147,7 +147,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir quip torch mliap}
 
 for w in $want; do
 case $w in
@@ -455,6 +455,21 @@ PY
     if $LMP -in in.ir_guard -log none 2>&1 | grep -q "not defined in a periodic box"; then
       ok "a periodic box without molecules is an error, not a plausible spectrum"
     else bad "a periodic sum q_i r_i was accepted"; fi
+  fi
+  ;;
+
+newton)
+  leg "the virial survives newton off, which is what KOKKOS selects"
+  if [ ! -e data/gap_files/CO.gap ]; then
+    echo "    SKIP: no GAP potential (set MADLIB_DATA_ROOT)"
+  else
+    for nt in on off; do
+      $LMP -in in.newton -var nt $nt -log none 2>&1 | grep -E '^ +0 ' | tail -1 \
+          > /tmp/mad_newton_$nt.txt
+    done
+    $PYTHON compare_newton.py /tmp/mad_newton_on.txt /tmp/mad_newton_off.txt
+    if [ $? -eq 0 ]; then ok "newton off gives the same energy and virial"
+    else bad "newton off changes the answer"; fi
   fi
   ;;
 

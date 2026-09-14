@@ -451,3 +451,36 @@ styles are all there, and the crash names Kokkos rather than the toolkit. And
 cached `CUDA_cudart_LIBRARY` outranks it -- the installer now drops the cache
 when it names a different CUDA, and refuses to finish if the linked runtime's
 major version differs from nvcc's.
+
+## 24. `vflag_global` is not set when LAMMPS asks for f.r
+
+`pair_turbogap` takes its virial from `virial_fdotr_compute()` rather than from
+TurboGAP's own accumulator, guarded the usual way:
+
+```cpp
+if (vflag_fdotr) virial_fdotr_compute();
+```
+
+Under `-k on g 1 -sf kk` the pressure came out as exactly zero, every component,
+while the energy agreed to all printed digits and the forces to 1.7e-09. The
+KOKKOS package selects `newton off`, and `verlet.cpp:68` then sets
+`virial_style = VIRIAL_PAIR` instead of `VIRIAL_FDOTR`, so `vflag_fdotr` is 0
+and a style with no per-pair tally contributes nothing. Nothing about it is
+specific to Kokkos: `newton off` on one CPU rank reproduces it.
+
+Widening the guard to `vflag_global` moved the hole rather than closing it,
+because `pair.cpp:998` reads
+
+```cpp
+vflag_global = vflag & VIRIAL_PAIR;
+if (vflag & VIRIAL_FDOTR && no_virial_fdotr_compute == 1) vflag_global = 1;
+```
+
+so with newton **on** `vflag_global` is 0 and `vflag_fdotr` is 1 -- the two
+modes arrive through different flags, and testing either one alone is wrong
+half the time. Setting `no_virial_fdotr_compute = 1` in the constructor is the
+way to say "this style computes its own global virial": `vflag_global` is then
+set in both modes and one guard covers them.
+
+The `newton` leg compares energy and all six virial components between the two
+modes and fails if they are zero in both, since zero agrees with zero.
