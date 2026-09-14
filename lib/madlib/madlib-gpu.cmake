@@ -25,6 +25,19 @@ if(NOT EXISTS ${TG}/hop/hop)
   message(FATAL_ERROR "${TG}/hop is empty; run git submodule update --init in TurboGAP")
 endif()
 
+# The device predictor has to be able to clamp. Without zero_trunc it returns
+# unfloored values and keeps the gradients of sites the host would have
+# floored, which is not a build error and not a crash -- it is core electron
+# binding energies and Hirshfeld volumes coming out different from the host
+# backend, in a build whose whole point is that they do not.
+file(READ ${TG}/gpu/gap_predict.cu MADLIB_TG_PREDICT)
+string(FIND "${MADLIB_TG_PREDICT}" "gpu_zero_trunc" MADLIB_TG_HAS_TRUNC)
+if(MADLIB_TG_HAS_TRUNC EQUAL -1)
+  message(FATAL_ERROR
+    "${TG} predates zero_trunc on the device local-property predictor.\n"
+    "       Update TurboGAP, or build without -D MADLIB_ENABLE_GPU.")
+endif()
+
 # Before enable_language, not after: cmake compiles a probe to identify the
 # CUDA compiler and defaults it to compute_52, which CUDA 13 has dropped. The
 # failure is ptxas rejecting sm_52 while identifying nvcc, which reads as a

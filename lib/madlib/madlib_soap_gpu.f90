@@ -27,7 +27,7 @@ module madlib_soap_gpu
    use madlib_soap_dims, only: c_to_f_string
    use soap_turbo_desc, only: get_soap
    use gap, only: get_soap_energy_and_forces, soap_backend_begin, soap_backend_end
-   use local_prop, only: local_property_predict
+   use local_prop, only: local_property_predict, gpu_local_property_predict
    use types, only: soap_turbo
    use gpu_context, only: ctx_cublas_handle => cublas_handle, ctx_gpu_stream => gpu_stream
 
@@ -615,6 +615,7 @@ contains
       integer :: n_chunks, c, ib, ie, jb, je, ns_b, np_b
       integer(c_size_t) :: max_bytes
       logical :: do_der
+      logical :: on_device
 
       do_der = (do_derivatives /= 0)
       call madlib_soap_gpu_init()
@@ -642,7 +643,7 @@ contains
                         n_species, max_bytes, n_chunks, i_beg, i_end, j_beg, j_end)
       call report_batches(n_chunks, n_sites, n_pairs)
 
-      qs_m = reshape(qs(1:dim*n_sparse), [dim, n_sparse])
+      on_device = .not. host_predict_requested()
 
       do c = 1, n_chunks
          ib = i_beg(c)
@@ -660,23 +661,140 @@ contains
                            central_weight, basis, scaling_mode, compress, n_nonzero, p_j, dim, &
                            do_der, buf, soap, soap_cart_der)
 
-         call cpy_dtoh_blocking(buf%soap_d, c_loc(soap), buf%st_soap)
-         if (do_der) call cpy_dtoh_blocking(buf%der_d, c_loc(soap_cart_der), buf%st_der)
-
-         if (do_der) then
-            call local_property_predict(soap, qs_m, alphas(1:n_sparse), v0, delta, zeta, &
-                                        v(ib:ie), do_der, soap_cart_der, n_neigh(ib:ie), &
-                                        der_p(:, jb:je), zero_trunc=(zero_trunc /= 0))
+         if (on_device) then
+!           der_p is shaped (3, 1) when there are no derivatives, so the batch's
+!           pair slice is only meaningful in the branch that has one.
+            if (do_der) then
+               call predict_on_device(ns_b, np_b, dim, n_sparse, qs, alphas, v0, delta, &
+                                      zeta, (zero_trunc /= 0), do_der, buf, n_neigh(ib), &
+                                      soap, v(ib), der_p(:, jb:je))
+            else
+               call predict_on_device(ns_b, np_b, dim, n_sparse, qs, alphas, v0, delta, &
+                                      zeta, (zero_trunc /= 0), do_der, buf, n_neigh(ib), &
+                                      soap, v(ib), der_p)
+            end if
          else
-            call local_property_predict(soap, qs_m, alphas(1:n_sparse), v0, delta, zeta, &
-                                        v(ib:ie), do_der, soap_cart_der, n_neigh(ib:ie), &
-                                        der_p, zero_trunc=(zero_trunc /= 0))
+!           The host route, kept reachable so the device one can be checked
+!           against it in one process rather than across two builds.
+            call cpy_dtoh_blocking(buf%soap_d, c_loc(soap), buf%st_soap)
+            if (do_der) call cpy_dtoh_blocking(buf%der_d, c_loc(soap_cart_der), buf%st_der)
+            if (.not. allocated(qs_m)) qs_m = reshape(qs(1:dim*n_sparse), [dim, n_sparse])
+            if (do_der) then
+               call local_property_predict(soap, qs_m, alphas(1:n_sparse), v0, delta, zeta, &
+                                           v(ib:ie), do_der, soap_cart_der, n_neigh(ib:ie), &
+                                           der_p(:, jb:je), zero_trunc=(zero_trunc /= 0))
+            else
+               call local_property_predict(soap, qs_m, alphas(1:n_sparse), v0, delta, zeta, &
+                                           v(ib:ie), do_der, soap_cart_der, n_neigh(ib:ie), &
+                                           der_p, zero_trunc=(zero_trunc /= 0))
+            end if
          end if
 
          call release(buf)
          deallocate (soap, soap_cart_der)
       end do
    end subroutine madlib_local_property_gpu
+
+!  The sparse-GP contraction, on the device.
+!
+!  What it replaces: copying the descriptor and its (3, dim, n_pairs) derivative
+!  tensor back and calling local_property_predict on the host. That tensor is
+!  the largest array in the calculation -- hundreds of MB for a real cell -- and
+!  taking it off the card was most of the reason the device path was only 1.3x.
+!
+!  Correct only since TurboGAP's gpu_local_property_predict learned zero_trunc.
+!  Core electron binding energies and Hirshfeld volumes both set it, so before
+!  that this would have quietly changed their values and their forces.
+!
+!  soap is passed unfilled: gpu_local_property_predict reads it for its shape
+!  alone, the values it uses being the ones already on the card in buf%soap_d.
+   subroutine predict_on_device(ns, np, dim, n_sparse, qs, alphas, v0, delta, zeta, &
+                                zero_trunc, do_der, buf, n_neigh, soap, v, v_der)
+      integer, intent(in) :: ns
+      integer, intent(in) :: np
+      integer(c_int), intent(in) :: dim
+      integer(c_int), intent(in) :: n_sparse
+      real(c_double), intent(in), target :: qs(*)
+      real(c_double), intent(in), target :: alphas(*)
+      real(c_double), intent(in) :: v0
+      real(c_double), intent(in) :: delta
+      real(c_double), intent(in) :: zeta
+      logical, intent(in) :: zero_trunc
+      logical, intent(in) :: do_der
+      type(soap_buffers), intent(inout) :: buf
+      integer(c_int), intent(in) :: n_neigh(*)
+      real(dp), intent(in), target :: soap(:, :)
+      real(c_double), intent(out) :: v(*)
+      real(dp), intent(out) :: v_der(:, :)
+
+      integer(c_int), allocatable, target :: l_index(:)
+      real(c_double), allocatable, target :: lp(:)
+      real(c_double), allocatable, target :: lp_der(:, :)
+      type(c_ptr) :: qs_d
+      type(c_ptr) :: alphas_d
+      type(c_ptr) :: lp_d
+      type(c_ptr) :: lp_der_d
+      type(c_ptr) :: l_index_d
+      integer(c_size_t) :: st_lp
+      integer(c_size_t) :: st_lp_der
+      integer :: i
+      integer :: j
+      integer :: l
+
+      allocate (l_index(1:max(np, 1)))
+      allocate (lp(1:ns))
+      allocate (lp_der(1:3, 1:max(np, 1)))
+
+!     Pair to site, one-based: what gap.f90 builds and what the derivative
+!     kernel indexes Qss with.
+      l = 0
+      do i = 1, ns
+         do j = 1, n_neigh(i)
+            l = l + 1
+            l_index(l) = i
+         end do
+      end do
+
+      st_lp = int(ns, c_size_t)*sizeof(lp(1))
+      st_lp_der = 3_c_size_t*int(max(np, 1), c_size_t)*sizeof(lp(1))
+
+!     Per call rather than cached: two computes in one run carry different
+!     models, and dim*n_sparse doubles is nothing beside the tensor this
+!     avoids moving.
+      call upload(c_loc(qs), qs_d, int(dim, c_size_t)*int(n_sparse, c_size_t)*sizeof(lp(1)))
+      call upload(c_loc(alphas), alphas_d, int(n_sparse, c_size_t)*sizeof(lp(1)))
+      call upload(c_loc(l_index), l_index_d, int(max(np, 1), c_size_t)*sizeof(l_index(1)))
+      call gpu_malloc_async(lp_d, st_lp, gpu_stream)
+      call gpu_malloc_async(lp_der_d, st_lp_der, gpu_stream)
+
+      call gpu_local_property_predict(n_sparse, soap, buf%soap_d, qs_d, alphas_d, v0, delta, &
+                                      zeta, lp, lp_d, do_der, buf%der_d, lp_der, lp_der_d, &
+                                      int(np, c_int), l_index_d, cublas_handle, gpu_stream, &
+                                      zero_trunc)
+
+      v(1:ns) = lp(1:ns)
+      if (do_der) v_der(1:3, 1:np) = lp_der(1:3, 1:np)
+
+      call gpu_free_async(qs_d, gpu_stream)
+      call gpu_free_async(alphas_d, gpu_stream)
+      call gpu_free_async(l_index_d, gpu_stream)
+      call gpu_free_async(lp_d, gpu_stream)
+      call gpu_free_async(lp_der_d, gpu_stream)
+      deallocate (l_index, lp, lp_der)
+   end subroutine predict_on_device
+
+!  Fall back to the host contraction. A diagnostic, not a tuning knob: it is
+!  how the device predictor gets compared against the host one inside a single
+!  process, which is the only comparison that means anything when the device
+!  does not reproduce itself run to run.
+   function host_predict_requested() result(yes)
+      logical :: yes
+
+      character(len=32) :: env
+
+      call get_environment_variable("MADLIB_SOAP_HOST_PREDICT", env)
+      yes = (len_trim(env) > 0 .and. trim(env) /= "0")
+   end function host_predict_requested
 
 !  Device bytes one SOAP batch may use.
 !

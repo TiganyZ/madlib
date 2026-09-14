@@ -692,7 +692,7 @@ pairgpu)
     echo "    SKIP: set LMP_GPU to an lmp built with -D MADLIB_ENABLE_GPU=on"
   else
     L=/tmp/madlib_pairgpu
-    rm -f md_ref.dump md_host.dump md_gpu.dump md_gpusplit.dump
+    rm -f md_ref.dump md_host.dump md_gpu.dump md_gpusplit.dump md_gpuhp.dump
     $LMP -in in.md_ref -log none >${L}_host.log 2>&1; hrc=$?
     mv -f md_ref.dump md_host.dump 2>/dev/null
     $LMP_GPU -in in.md_ref -log none >${L}_dev.log 2>&1; drc=$?
@@ -703,9 +703,16 @@ pairgpu)
     MADLIB_SOAP_MAX_GB=0.02 MADLIB_SOAP_BATCH_REPORT=1 \
       $LMP_GPU -in in.md_ref -log none >${L}_split.log 2>&1; src=$?
     mv -f md_ref.dump md_gpusplit.dump 2>/dev/null
+    # The same binary with the sparse-GP contraction moved back to the host.
+    # The device predictor is the newest half of the device path and this is
+    # the only comparison that isolates it: every stage before the contraction
+    # is the same code in both runs, so a difference can only come from it.
+    MADLIB_SOAP_HOST_PREDICT=1 $LMP_GPU -in in.md_ref -log none >${L}_hp.log 2>&1; prc=$?
+    mv -f md_ref.dump md_gpuhp.dump 2>/dev/null
     nb=$(grep -c "soap batches" ${L}_split.log 2>/dev/null)
-    if [ $hrc -ne 0 ] || [ $drc -ne 0 ] || [ $src -ne 0 ] \
-       || ! have md_host.dump || ! have md_gpu.dump || ! have md_gpusplit.dump; then
+    if [ $hrc -ne 0 ] || [ $drc -ne 0 ] || [ $src -ne 0 ] || [ $prc -ne 0 ] \
+       || ! have md_host.dump || ! have md_gpu.dump || ! have md_gpusplit.dump \
+       || ! have md_gpuhp.dump; then
       tail -8 ${L}_dev.log | sed 's/^/     /'
       bad "one of the backends did not finish five steps"
     elif [ "${nb:-0}" -eq 0 ]; then
@@ -714,7 +721,8 @@ pairgpu)
       echo "    forced split: $(grep -m1 'soap batches' ${L}_split.log | sed 's/^ *//')"
       if $PYTHON compare_pair_md.py md_host.dump ${L}_host.log \
                                     device md_gpu.dump ${L}_dev.log \
-                                    device_batched md_gpusplit.dump ${L}_split.log; then
+                                    device_batched md_gpusplit.dump ${L}_split.log \
+                                    host_contraction md_gpuhp.dump ${L}_hp.log; then
         ok "the device backend gives the host's trajectory, batched or not"
       else
         bad "the device backend disagrees with the host"

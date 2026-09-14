@@ -434,14 +434,16 @@ it already calls `madlib_local_property`. `tests/soaplocalpropdump.f90` is the
 proof and contains no `#ifdef`: one source, compiled twice against the two
 backends, agreeing to 5.9e-12 on values and 1.2e-11 on derivatives.
 
-One deliberate asymmetry. The prediction stays on the **host** in both, through
-`local_property_predict`, even though `gpu_local_property_predict` exists. The
-device routine takes no `zero_trunc` and does not clamp; the host one floors
-negative values and zeroes their gradients. Core electron binding energies and
-Hirshfeld volumes both set `zero_trunc`, so using the device predictor would
-quietly change the answer for exactly the quantities this is for. The expensive
-part is the descriptor and that is on the device; the contraction after it is
-not worth a silent change in physics.
+The contraction after the descriptor is on the device too, through
+`gpu_local_property_predict`. It was on the host for a long time and for a
+reason: the device routine took no `zero_trunc` and did not clamp, while the
+host one floors negative values and zeroes their gradients, and core electron
+binding energies and Hirshfeld volumes both set `zero_trunc` -- so using it
+would have changed the answer for exactly the quantities this exists for.
+TurboGAP's device predictor now takes `zero_trunc`, which is what made the
+switch safe; `lib/madlib/madlib-gpu.cmake` refuses to configure against a
+TurboGAP that predates it. `MADLIB_SOAP_HOST_PREDICT=1` puts the contraction
+back on the host, which is how the two are compared inside one process.
 
 ## 8. Stage 4, and why it is not a kernel port
 
@@ -731,12 +733,28 @@ Per-step SOAP, `TURBOGAP_PROFILE=1`, host build against device build:
 | 728 | 539 ms | 441 ms | 1.22x |
 | 2457 | 1537 ms | 1175 ms | 1.31x |
 
-Less than the 1.67x the standalone driver gets, and the reason is visible in
-the design: the shim computes the descriptor on the device and copies the
-**whole derivative tensor** back — 3 × dim × n_pairs doubles, hundreds of MB
-per call — to do the sparse-GP contraction on the host. That contraction is on
-the host on purpose (`gpu_local_property_predict` has no `zero_trunc`, §8), so
-closing this gap means fixing that in TurboGAP, not tuning here.
+Those were measured while the shim still copied the **whole derivative
+tensor** back — 3 × dim × n_pairs doubles, hundreds of MB per call — to run the
+sparse-GP contraction on the host, which was most of what the device path was
+saving. Keeping the contraction on the card removes that, and it is the larger
+effect of the two:
+
+| atoms | host backend | device SOAP, host contraction | device SOAP, device contraction |
+|---|---|---|---|
+| 728 | 10.31 s | 8.34 s (1.24x) | 4.48 s (**2.30x**) |
+| 2457 | 30.46 s | 26.23 s (1.16x) | 15.09 s (**2.02x**) |
+
+20 steps of `in.bench`, LAMMPS's Loop time, one A2000, two runs each, all three
+columns measured the same way so they are comparable with each other. The
+middle column is the same binary as the right-hand one with
+`MADLIB_SOAP_HOST_PREDICT=1`, so those two differ only in where the contraction
+runs. Every figure repeated to within 1% except the 728-atom middle column,
+which gave 8.92 s and 7.75 s -- report it as approximate.
+
+These are not the 1.22x/1.31x recorded above for the host-contraction path:
+those came from per-step profiling rather than Loop time, and the two are not
+comparable. The ratio to trust for a decision is the one between the last two
+columns, which is one binary against itself.
 
 ### Proof the device path is the one running
 
