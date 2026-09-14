@@ -24,6 +24,39 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 LMP=${LMP:-../../lammps/build/lmp}
 PYTHON=${PYTHON:-python3}
 RANKS=${RANKS:-4}
+
+# The Fortran backend is built either by lib/madlib's own Makefile or by the
+# cmake build that sits beside the binary. Take whichever exists: on a machine
+# where only cmake ran, every soap_turbo leg otherwise skips with a message
+# telling you to build something that is already built.
+find_madlib_lib() {
+  local c
+  for c in ../lib/madlib "$(dirname "$LMP")/build-madlib"; do
+    if [ -f "$c/libmadlib.a" ] && [ -d "$c/mod" ]; then echo "$c"; return; fi
+  done
+  echo ../lib/madlib
+}
+MADLIB_LIB=${MADLIB_LIB:-$(find_madlib_lib)}
+
+# compute mad/property/python runs inside LAMMPS's own embedded interpreter,
+# which is the one lmp was linked against -- not $PYTHON, and never a venv. It
+# therefore cannot see numpy or torch unless they are put on its path, and the
+# leg fails on "No module named numpy" rather than skipping. Only do it when
+# the two interpreters are the same minor version: the packages that matter
+# here are compiled extensions, and a mismatched one fails less clearly.
+embedded_python_version() {
+  ldd "$LMP" 2>/dev/null | grep -o 'libpython3\.[0-9]\+' | head -1 | sed 's/libpython//'
+}
+export_python_path() {
+  local emb this site
+  emb=$(embedded_python_version)
+  [ -n "$emb" ] || return 0
+  this=$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+  [ "$emb" = "$this" ] || return 0
+  site=$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)
+  [ -n "$site" ] && export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$site"
+}
+export_python_path
 # Open MPI's shared-memory transport uses Cross Memory Attach, which needs
 # ptrace permission. On a host with kernel.yama.ptrace_scope = 2 (alt is one)
 # every transfer fails with "Read -1, expected N, errno = 1" and the run dies
@@ -53,7 +86,7 @@ have() { [ -e "$1" ]; }
 # stem in this directory, $2 what a pass means.
 fortran_check() {
   local stem=$1 what=$2
-  local lib=../lib/madlib
+  local lib=$MADLIB_LIB
   if [ ! -f "$lib/libmadlib.a" ] || [ ! -d "$lib/mod" ]; then
     echo "    SKIP: $lib is not built (make -C $lib)"
     return
@@ -77,7 +110,7 @@ fortran_check() {
 # $1 source stem, $2 host binary, $3 device binary.
 build_cpu_and_gpu() {
   local stem=$1 hostbin=$2 devbin=$3
-  local lib=../lib/madlib
+  local lib=$MADLIB_LIB
   local g=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
   gfortran -O2 -cpp -ffree-line-length-none -I "$lib/mod" "$stem.f90" -o "$hostbin" \
       "$lib/libmadlib.a" -llapack -lblas 2>/tmp/mad_gpubuild.log || return 1
@@ -427,7 +460,7 @@ PY
 kk)
   leg "turbogap/kk reproduces turbogap"
   if ! $LMP -h 2>/dev/null | grep -q "turbogap/kk"; then
-    echo "    SKIP: built without the KOKKOS package"
+    echo "    SKIP: no turbogap/kk in this binary"
   else
     compare_kk "glassy carbon, 91 atoms" in.pair_turbogap in.pair_turbogap_kk pair_turbogap
     compare_kk "core_pot probe, 3 close pairs" in.core_probe in.core_probe_kk core_probe
@@ -441,7 +474,7 @@ soapbasis)
 
 soapgpu)
   leg "the device SOAP descriptor reproduces the host's"
-  LIB=../lib/madlib
+  LIB=$MADLIB_LIB
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
   if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
     echo "    SKIP: $LIB is not built (make -C $LIB)"
@@ -487,7 +520,7 @@ soapgpu)
 
 soappredict)
   leg "the device SOAP energies and forces reproduce the host's"
-  LIB=../lib/madlib
+  LIB=$MADLIB_LIB
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
   if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
     echo "    SKIP: $LIB is not built (make -C $LIB)"
@@ -514,7 +547,7 @@ soappredict)
 
 soapswap)
   leg "the same call gives the same answer on either backend"
-  LIB=../lib/madlib
+  LIB=$MADLIB_LIB
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
   if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
     echo "    SKIP: $LIB is not built (make -C $LIB)"
@@ -553,7 +586,7 @@ soapswap)
 
 soapbatch)
   leg "splitting SOAP into batches changes no answer"
-  LIB=../lib/madlib
+  LIB=$MADLIB_LIB
   GPUOBJ=${MADLIB_SOAP_GPU_OBJ:-/tmp/madlib_soap_gpu}
   if [ ! -f "$LIB/libmadlib.a" ] || [ ! -d "$LIB/mod" ]; then
     echo "    SKIP: $LIB is not built (make -C $LIB)"

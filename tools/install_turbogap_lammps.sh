@@ -151,8 +151,10 @@ CU
     case "$cc" in
         70|72) echo VOLTA$cc ;;
         75)    echo TURING75 ;;
-        80|86|89) echo AMPERE$cc ;;
+        80|86|87) echo AMPERE$cc ;;
+        89)    echo ADA89 ;;
         90)    echo HOPPER90 ;;
+        100|120) echo BLACKWELL$cc ;;
         *)     die "could not identify the GPU (compute capability '$cc'); set GPU_ARCH by hand" ;;
     esac
 }
@@ -184,6 +186,9 @@ stage_python() {
     fi
     pip install --quiet mace-torch || step "WARNING: mace-torch did not install"
     pip install --quiet tensorpotential || step "note: GRACE (tensorpotential) not installed"
+    # Not used by any style: it is the independent oracle the QUIP cross-check
+    # leg compares pair_style quip against, and that leg skips without it.
+    pip install --quiet quippy-ase || step "note: quippy not installed, the QUIP cross-check will skip"
     step "python: $(python3 -c 'import sys;print(sys.version.split()[0])')"
     step "torch:  $(python3 -c 'import torch;print(torch.__version__)' 2>/dev/null || echo none)"
 }
@@ -323,12 +328,28 @@ cmake_flags() {
     fi
 }
 
+# A cached CUDA_cudart_LIBRARY beats a freshly passed CUDAToolkit_ROOT, so
+# rerunning the script after fixing CUDA_HOME would quietly keep the wrong
+# runtime. Only the cache is removed; the object files stay, and anything whose
+# compile flags did not change is not rebuilt.
+drop_stale_cuda_cache() {
+    local cache=$1/CMakeCache.txt
+    [ -n "$GPU_ARCH" ] || return 0
+    [ -f "$cache" ] || return 0
+    grep -q "CUDA_cudart_LIBRARY:FILEPATH=$CUDA_HOME/" "$cache" && return 0
+    step "the cmake cache names a different CUDA; reconfiguring"
+    rm -f "$cache"
+}
+
 # The runtime the binary resolves must match the nvcc that built its device
 # code. Checked rather than assumed: the failure mode is silent at build time.
 check_cuda_runtime() {
     [ -n "$GPU_ARCH" ] || return 0
     local lmp=$PREFIX/lammps/build/lmp got want
     [ -x "$lmp" ] || return 0
+    if ldd "$lmp" 2>/dev/null | grep -q 'libcudart.*not found'; then
+        die "libcudart is not on the loader's path -- add $CUDA_HOME/lib64 to LD_LIBRARY_PATH"
+    fi
     got=$(ldd "$lmp" 2>/dev/null | sed -n 's/.*libcudart\.so\.\([0-9]*\).*/\1/p' | head -1)
     want=$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9]*\)\..*/\1/p')
     [ -n "$got" ] && [ -n "$want" ] || return 0
@@ -351,6 +372,7 @@ stage_build() {
     fi
     local build=$PREFIX/lammps/build
     ensure_dir "$build"
+    drop_stale_cuda_cache "$build"
     # shellcheck disable=SC2046
     ( cd "$build" && cmake ../cmake $(cmake_flags) ) || die "cmake failed"
     ( cd "$build" && make -j"$JOBS" ) || die "build failed"

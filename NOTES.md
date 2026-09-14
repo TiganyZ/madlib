@@ -410,3 +410,44 @@ the autograd adjoint finite-differences at order 2.00.
 The ML-IAP backend is checked against `pair_style mliap`'s own per-atom
 energies for the same model, which agree **exactly**, and its adjoint
 finite-differences at order 2.00 with all four virial components correct.
+
+## 23. A mixed CUDA toolkit fails as an integer divide-by-zero
+
+On `alt` the GPU build linked cleanly and every style was present, then every
+run died at startup:
+
+```
+Signal: Floating point exception (8), Integer divide-by-zero
+NeighBondKokkos<Kokkos::OpenMP>::NeighBondKokkos
+  -> UnorderedMap<int,int,Kokkos::Cuda>::UnorderedMap
+    -> deep_copy -> contiguous_fill_or_memset -> parallel_for
+```
+
+Nothing in MADLIB is on that stack; `pair_style lj/cut` with `-k on g 1`
+reproduces it. The faulting instruction is `div %r12d` in
+`Kokkos_Cuda_Parallel_Range.hpp:103`, the `(nwork + block_size - 1) / block_size`
+that sizes the grid, with `block_size == 0` from `cuda_deduce_block_size`.
+
+That function returns 0 only when no block size gives one resident block, so the
+device properties it reads must be wrong. From the core:
+
+```
+maxThreadsPerBlock       1024        (right)
+maxThreadsPerMultiProc   1           (should be 1536)
+maxBlocksPerMultiProc    1           (should be 16)
+sharedMemPerMultiproc    4294968832  = 2^32 + 1536
+```
+
+The 1536 sitting four bytes above where it belongs is the whole diagnosis: the
+fields are shifted. `cudaGetDeviceProperties` filled the struct in one CUDA
+version's layout and Kokkos read it in another's. `ldd` confirmed it --
+`libcudart.so.12` under a binary whose device code nvcc 13.4 compiled, because
+`FindCUDAToolkit` took its headers from `/usr/local/cuda-13.4` and its library
+from the distro's `/usr/lib/x86_64-linux-gnu`.
+
+Two things make this worth writing down. It is silent: the build succeeds, the
+styles are all there, and the crash names Kokkos rather than the toolkit. And
+`CUDAToolkit_ROOT` alone does not fix an existing build directory, because a
+cached `CUDA_cudart_LIBRARY` outranks it -- the installer now drops the cache
+when it names a different CUDA, and refuses to finish if the linked runtime's
+major version differs from nvcc's.
