@@ -201,7 +201,7 @@ contains
                            atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, &
                            atom_sigma_t_scaling, amplitude_scaling, radial_enhancement, &
                            central_weight, basis, scaling_mode, compress, n_nonzero, p_j, dim, &
-                           do_der, buf, soap, soap_cart_der)
+                           do_der, buf, soap, soap_cart_der, zero_host)
       integer(c_int), value :: n_sites, n_pairs, n_species, l_max, radial_enhancement
       integer(c_int), value :: compress, n_nonzero, dim
       integer(c_int), intent(in), target :: n_neigh(*), species_idx(*), alpha_max(*), p_j(*)
@@ -212,9 +212,17 @@ contains
       real(c_double), intent(in), target :: amplitude_scaling(*), central_weight(*)
       character(kind=c_char), intent(in) :: basis(*), scaling_mode(*)
       logical, intent(in) :: do_der
+!     Whether the caller is going to read the host arrays. The device get_soap
+!     never writes them -- its copy back to the host is commented out and the
+!     results are read from soap_d and der_d -- so for a caller that stays on
+!     the device they are write-only scratch that exists to satisfy the
+!     argument list, and touching them is hundreds of MB of page faults per
+!     batch for nothing.
+      logical, intent(in), optional :: zero_host
       type(soap_buffers), intent(out) :: buf
       real(dp), allocatable, intent(out) :: soap(:, :)
       real(dp), allocatable, intent(out) :: soap_cart_der(:, :, :)
+      logical :: zero_them
 
       type(c_ptr) :: n_neigh_d
       integer(c_size_t) :: st_dbl, st_int
@@ -280,8 +288,12 @@ contains
       else
          allocate (soap_cart_der(1:3, 1:dim, 1:1))
       end if
-      soap = 0.d0
-      soap_cart_der = 0.d0
+      zero_them = .true.
+      if (present(zero_host)) zero_them = zero_host
+      if (zero_them) then
+         soap = 0.d0
+         soap_cart_der = 0.d0
+      end if
 
       call get_soap(n_sites, n_neigh(1:n_sites), n_species, species, species_multiplicity, &
                     n_pairs, mask, rjs(1:n_pairs), thetas(1:n_pairs), phis(1:n_pairs), &
@@ -659,7 +671,7 @@ contains
                            global_scaling, atom_sigma_r, atom_sigma_r_scaling, atom_sigma_t, &
                            atom_sigma_t_scaling, amplitude_scaling, radial_enhancement, &
                            central_weight, basis, scaling_mode, compress, n_nonzero, p_j, dim, &
-                           do_der, buf, soap, soap_cart_der)
+                           do_der, buf, soap, soap_cart_der, zero_host=.not. on_device)
 
          if (on_device) then
 !           der_p is shaped (3, 1) when there are no derivatives, so the batch's

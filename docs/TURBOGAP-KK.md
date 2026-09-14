@@ -741,20 +741,35 @@ effect of the two:
 
 | atoms | host backend | device SOAP, host contraction | device SOAP, device contraction |
 |---|---|---|---|
-| 728 | 10.31 s | 8.34 s (1.24x) | 4.48 s (**2.30x**) |
-| 2457 | 30.46 s | 26.23 s (1.16x) | 15.09 s (**2.02x**) |
+| 728 | 10.30 s | 7.75 s (1.33x) | 3.22 s (**3.20x**) |
+| 2457 | 30.45 s | 26.19 s (1.16x) | 10.79 s (**2.82x**) |
 
-20 steps of `in.bench`, LAMMPS's Loop time, one A2000, two runs each, all three
-columns measured the same way so they are comparable with each other. The
-middle column is the same binary as the right-hand one with
-`MADLIB_SOAP_HOST_PREDICT=1`, so those two differ only in where the contraction
-runs. Every figure repeated to within 1% except the 728-atom middle column,
-which gave 8.92 s and 7.75 s -- report it as approximate.
+20 steps of `in.bench`, LAMMPS's Loop time, one A2000, **best of four runs**,
+all three columns measured the same way.
+
+Best of four rather than a mean, because alt is a shared workstation and was
+not quiet: load average 7 on 12 cores, with a virus scanner holding 120% of one
+throughout. That hits the columns unequally -- the host backend is CPU bound and
+repeated between 10.30 s and 13.86 s at 728 atoms, while the device-contraction
+column is GPU bound and stayed within 3.22-3.65 s. The minimum is the least
+contaminated estimate of each; on a quiet machine the ratios would be worth
+quoting to more than two figures, and this pair of numbers is not.
+
+Two of the three columns come from one binary: the middle one is the right-hand
+one run with `MADLIB_SOAP_HOST_PREDICT=1`. That ratio, 2.4x at both sizes, is
+the solid one -- same process, same descriptor, differing only in where the
+contraction runs.
 
 These are not the 1.22x/1.31x recorded above for the host-contraction path:
 those came from per-step profiling rather than Loop time, and the two are not
-comparable. The ratio to trust for a decision is the one between the last two
-columns, which is one binary against itself.
+comparable.
+
+Roughly a third of the device-path gain is not the contraction at all. On that
+path the host still allocated and zeroed `soap_cart_der`, 3 x dim x n_pairs
+doubles, for a device `get_soap` that never writes it -- the copy back to the
+host is commented out in `soap_turbo.f90` and the results are read from
+`soap_cart_der_d`. Hundreds of MB of page faults per batch for an array that
+existed to satisfy an argument list. `run_get_soap` now takes `zero_host`.
 
 ### Proof the device path is the one running
 
