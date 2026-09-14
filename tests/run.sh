@@ -709,6 +709,22 @@ pairgpu)
     # is the same code in both runs, so a difference can only come from it.
     MADLIB_SOAP_HOST_PREDICT=1 $LMP_GPU -in in.md_ref -log none >${L}_hp.log 2>&1; prc=$?
     mv -f md_ref.dump md_gpuhp.dump 2>/dev/null
+    # The Kokkos pair style AND the device SOAP backend, in one binary. Every
+    # other comparison in this leg has one of the two: pairmd runs turbogap/kk
+    # on the host build, and the runs above use the plain style. This is the
+    # combination the package is for, and the only one where the shim's stream
+    # and cuBLAS handle share a process with Kokkos's.
+    kkdev=""
+    rm -f md_kk.dump
+    if $LMP_GPU -h 2>/dev/null | grep -q "turbogap/kk"; then
+      $LMP_GPU -k on g 1 -sf kk -in in.md_kk -log none >${L}_kkdev.log 2>&1
+      if have md_kk.dump; then
+        kkdev="kk_device md_kk.dump ${L}_kkdev.log"
+      else
+        tail -8 ${L}_kkdev.log | sed 's/^/     /'
+        bad "turbogap/kk did not finish under the device SOAP backend"
+      fi
+    fi
     nb=$(grep -c "soap batches" ${L}_split.log 2>/dev/null)
     if [ $hrc -ne 0 ] || [ $drc -ne 0 ] || [ $src -ne 0 ] || [ $prc -ne 0 ] \
        || ! have md_host.dump || ! have md_gpu.dump || ! have md_gpusplit.dump \
@@ -722,7 +738,7 @@ pairgpu)
       if $PYTHON compare_pair_md.py md_host.dump ${L}_host.log \
                                     device md_gpu.dump ${L}_dev.log \
                                     device_batched md_gpusplit.dump ${L}_split.log \
-                                    host_contraction md_gpuhp.dump ${L}_hp.log; then
+                                    host_contraction md_gpuhp.dump ${L}_hp.log $kkdev; then
         ok "the device backend gives the host's trajectory, batched or not"
       else
         bad "the device backend disagrees with the host"
