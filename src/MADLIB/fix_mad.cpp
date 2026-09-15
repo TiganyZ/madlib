@@ -17,6 +17,7 @@
 
 #include "fix_mad.h"
 
+#include "atom_masks.h"
 #include "comm.h"
 #include "error.h"
 #include "mad_target.h"
@@ -43,6 +44,17 @@ FixMAD::FixMAD(LAMMPS *lmp, int narg, char **arg) :
   global_freq = 1;
   energy_global_flag = virial_global_flag = 1;
   thermo_energy = thermo_virial = 1;
+
+  // What this fix actually touches. Fix's own defaults are ALL_MASK for both,
+  // which claims it writes positions -- and under KOKKOS that claim is acted
+  // on: LAMMPS marks atom:x modified on the host after every invocation while
+  // the minimiser holds x on the device, so the next access finds both flags
+  // set and Kokkos aborts the run with
+  //   Concurrent modification of host and device views in DualView "atom:x"
+  // The bias reads coordinates and adds to forces. It has never written a
+  // coordinate.
+  datamask_read = X_MASK | F_MASK | TYPE_MASK | MASK_MASK;
+  datamask_modify = F_MASK;
 
   target = new MADTarget(error);
 }

@@ -15,6 +15,7 @@
    Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
+#include "atom_masks.h"
 #include "fix_mad_ir.h"
 
 #include "atom.h"
@@ -105,6 +106,13 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
                prop->n_components());
 
   scalar_flag = 1;
+
+  // Reads coordinates, adds to forces, and writes neither a coordinate nor a
+  // velocity. Fix defaults both masks to ALL_MASK, which under KOKKOS makes
+  // LAMMPS mark atom:x modified on the host after every call and aborts the
+  // run the moment the device also holds x. See fix_mad.cpp.
+  datamask_read = X_MASK | F_MASK | TYPE_MASK | MASK_MASK;
+  datamask_modify = F_MASK;
   extscalar = 0;
   vector_flag = 1;
   size_vector = 5;

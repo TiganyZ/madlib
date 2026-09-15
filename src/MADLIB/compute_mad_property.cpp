@@ -15,6 +15,7 @@
    Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
+#include "atom_masks.h"
 #include "compute_mad_property.h"
 
 #include "atom.h"
@@ -29,6 +30,12 @@ ComputeMADProperty::ComputeMADProperty(LAMMPS *lmp, int narg, char **arg) :
     Compute(lmp, narg, arg), ncomp(1), nmax_adj(0), fadj(nullptr)
 {
   peratom_flag = 1;
+
+  // Reads coordinates; adjoint() accumulates into forces for the fix that owns
+  // it. Never writes a position, which Compute's ALL_MASK default claims it
+  // does -- and under KOKKOS that claim aborts the run.
+  datamask_read = X_MASK | F_MASK | TYPE_MASK | MASK_MASK;
+  datamask_modify = F_MASK;
   comm_reverse = 3;
 }
 

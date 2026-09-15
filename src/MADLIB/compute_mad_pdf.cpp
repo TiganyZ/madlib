@@ -15,6 +15,7 @@
    Contributing author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 ------------------------------------------------------------------------- */
 
+#include "atom_masks.h"
 #include "compute_mad_pdf.h"
 
 #include "atom.h"
@@ -111,6 +112,12 @@ ComputeMADPdf::ComputeMADPdf(LAMMPS *lmp, int narg, char **arg) :
   nchan = ntypes * (ntypes + 1) / 2;
 
   array_flag = 1;
+
+  // Read only. Compute defaults both masks to ALL_MASK; claiming to modify
+  // positions under KOKKOS is what aborts a run with "Concurrent modification
+  // of host and device views".
+  datamask_read = X_MASK | TYPE_MASK | MASK_MASK;
+  datamask_modify = EMPTY_MASK;
   size_array_rows = nbins;
   size_array_cols = nchan + 1;
   extarray = 0;
