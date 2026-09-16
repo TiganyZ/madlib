@@ -18,7 +18,13 @@
 #include "fix_mad.h"
 
 #include "atom_masks.h"
+#include "atom.h"
 #include "comm.h"
+
+#ifdef LMP_KOKKOS
+#include "atom_kokkos.h"
+#include "kokkos.h"
+#endif
 #include "error.h"
 #include "mad_target.h"
 #include "update.h"
@@ -54,7 +60,15 @@ FixMAD::FixMAD(LAMMPS *lmp, int narg, char **arg) :
   // The bias reads coordinates and adds to forces. It has never written a
   // coordinate.
   datamask_read = X_MASK | F_MASK | TYPE_MASK | MASK_MASK;
-  datamask_modify = F_MASK;
+  // EMPTY rather than F_MASK, and apply() marks f itself. ModifyKokkos applies
+  // datamask_modify AFTER post_force returns, so declaring F_MASK here leaves
+  // the host holding the only claim on f at the moment the fix hands back --
+  // and MinFireKokkos::run_iterate ends its loop with a bare
+  //   atomKK->modified(Device, X_MASK | V_MASK | F_MASK);
+  // and no sync before it. Both sides then claim f and Kokkos aborts. Doing
+  // the marking inside apply() lets the sync that follows it close that
+  // window; see the end of apply().
+  datamask_modify = EMPTY_MASK;
 
   target = new MADTarget(error);
 }
@@ -187,6 +201,26 @@ void FixMAD::apply(int vflag)
   accumulate_bias(dEdy.data());
 
   if (outfile && outevery > 0 && (update->ntimestep % outevery) == 0) write_spectrum();
+
+#ifdef LMP_KOKKOS
+  // Hand the forces back coherent rather than host-authoritative.
+  //
+  // The bias adds to f on the host, so the host's copy is the new one and
+  // something has to say so. Doing it here instead of through datamask_modify
+  // is what makes the pair atomic: mark, then immediately push across, so the
+  // fix never returns with the host holding the only claim. LAMMPS's Kokkos
+  // FIRE minimiser closes its iteration loop with a bare
+  //   atomKK->modified(Device, X_MASK | V_MASK | F_MASK);
+  // and no sync ahead of it, which aborts the run the moment a non-Kokkos fix
+  // has written forces:
+  //   Concurrent modification of host and device views in DualView "atom:f"
+  // Costs one 3*nall copy per bias evaluation, and only when Kokkos is on.
+  if (lmp->kokkos) {
+    auto *akk = (AtomKokkos *) atom;
+    akk->modified(Host, F_MASK);
+    akk->sync(Device, F_MASK);
+  }
+#endif
 }
 
 /* ---------------------------------------------------------------------- */
