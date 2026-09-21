@@ -1,6 +1,15 @@
-# MADLIB -- Molecular Augmented Dynamics for LAMMPS
+# MADlib -- Molecular Augmented Dynamics for LAMMPS
 
-Bias a LAMMPS simulation towards experimental data. MADLIB predicts an
+![Madlib](./images/madlib_logo.png)
+
+Not the legendary rap producer, but an efficient Molecular Augmented Dynamics library for experimental atomistic structure inference for use with LAMMPS.
+
+Currently available observables: X-ray diffraction, neutron diffraction, X-ray photoelectron spectroscopy, Nuclear Magnetic Resonance, Infrared spectroscopy, Raman Spectroscopy. 
+
+
+## What does this do? 
+
+Biases a LAMMPS simulation towards experimental data. MADLIB predicts an
 observable from the current configuration, penalises the mismatch, and adds the
 gradient of that penalty to the forces:
 
@@ -61,9 +70,9 @@ cohesive energy. Getting this wrong by two orders of magnitude is the commonest
 way to destroy a run, and it does not look like a failure -- the dissimilarity
 falls obediently while the structure comes apart.
 
-## Experimentally biased Monte Carlo
+## Reverse Monte Carlo
 
-There is no MADLIB MC code, and none is needed. `fix gcmc`, `fix atom/swap`,
+There is no MADLIB MC code. `fix gcmc`, `fix atom/swap`,
 `fix widom` and `fix tfmc` all price a trial move with `compute pe` after
 calling `modify->post_force()`, and a fix with `energy_global_flag` set and
 `fix_modify energy yes` contributes to that. So
