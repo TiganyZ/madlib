@@ -1,0 +1,16 @@
+tests/_fd.data
+tests/*.dat
+tests/*.dump
+tests/__pycache__/
+tests/in.kde0
+tests/in.range
+tests/data/_fd.data
+lib/madlib/*.o
+lib/madlib/turbogap/*.o
+lib/madlib/*.mod
+lib/madlib/mod/
+lib/madlib/libmadlib.a
+tests/*.dump
+tests/in.ir_guard.log
+tests/.run.lock/
+tests/data/gap_files/

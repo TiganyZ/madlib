@@ -1,0 +1,14 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The same file asked for a local property. TurboGAP's dipole is the gradient
+# of the fitted local energy at the central atom's own position, a different
+# contraction of the descriptor, so there is no local property here to read.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/water6.data
+pair_style      zero 6.0
+pair_coeff      * *
+compute mu all mad/property/turbogap ${dgap} dipole species O H
+thermo_style    custom step c_mu
+run 0

@@ -1,0 +1,17 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+variable        bias index yes
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+compute cn  all mad/property/coord cutoff 1.7 2.1
+fix     mad all mad/xps c_cn target data/xps_target.dat energy 0.0 5.0 201 sigma 0.25 gamma 200.0
+fix_modify mad energy ${bias}
+compute mype all pe
+thermo_style custom step f_mad c_mype
+thermo_modify format float %.12g
+run 0

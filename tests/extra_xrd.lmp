@@ -1,0 +1,4 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.1
+fix     mad all mad/xrd c_gr target data/xrd_target.dat q 1.04525 9.97006 201 &
+        output qFq species C O weighting xray gamma 100.0

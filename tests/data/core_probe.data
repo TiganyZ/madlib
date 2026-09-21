@@ -1,0 +1,27 @@
+# Three pairs inside the core_pot range, one per block.
+#
+# core_pot is defined on r in [0.05, 1.0] A and is identically zero beyond it,
+# so every equilibrated structure gives it exactly zero -- which is why the
+# glassy-carbon cell cannot check it. Here C-C, C-O and O-O sit at 0.75, 0.65
+# and 0.85 A, and the pairs are ~7 A apart so they do not see each other.
+
+6 atoms
+2 atom types
+
+0.0 24.0 xlo xhi
+0.0 12.0 ylo yhi
+0.0 12.0 zlo zhi
+
+Masses
+
+1 12.011
+2 15.999
+
+Atoms # atomic
+
+1 1 2.00 6.0 6.0
+2 1 2.75 6.0 6.0
+3 1 10.00 6.0 6.0
+4 2 10.65 6.0 6.0
+5 2 18.00 6.0 6.0
+6 2 18.85 6.0 6.0

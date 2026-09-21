@@ -1,0 +1,6 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+comm_modify cutoff 6.0
+compute q  all mad/property/mliap model linear data/Ta06A.mliap.model &
+                                 descriptor sna data/Ta06A.mliap.descriptor
+fix     mad all mad/xps c_q target data/mliap_target.dat energy -18.0 -15.0 201 &
+        sigma 0.1 gamma 100.0

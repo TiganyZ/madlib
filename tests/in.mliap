@@ -1,0 +1,25 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+# An ML-IAP model read as a per-atom property. Its values must match the
+# per-atom energies pair_style mliap reports for the same model.
+units           metal
+boundary        p p p
+atom_style      atomic
+lattice         bcc 3.316
+region          box block 0 4 0 4 0 4
+create_box      1 box
+create_atoms    1 box
+mass            1 180.88
+
+displace_atoms  all random 0.12 0.12 0.12 8371 units box
+
+pair_style      mliap model linear data/Ta06A.mliap.model &
+                      descriptor sna data/Ta06A.mliap.descriptor
+pair_coeff      * * Ta
+
+compute q  all mad/property/mliap model linear data/Ta06A.mliap.model &
+                                  descriptor sna data/Ta06A.mliap.descriptor
+compute pa all pe/atom
+dump d all custom 1 mliap_q.dump id c_q c_pa
+dump_modify d format float %.14f sort id
+thermo_style custom step pe
+run 0

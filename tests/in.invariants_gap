@@ -1,0 +1,22 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 6.0
+pair_coeff      * *
+comm_modify     cutoff 6.0
+neighbor        0.5 bin
+
+compute cebe all mad/property/turbogap data/gap_files/CO.gap core_electron_be species C O
+fix     mad  all mad/xps c_cebe target data/xps_gap_target.dat energy 280.0 540.0 521 &
+        sigma 0.4 gamma 20.0
+
+compute fsx all reduce sum fx
+compute fsy all reduce sum fy
+compute fsz all reduce sum fz
+compute vir all pressure NULL virial
+thermo_style custom step f_mad f_mad[2] f_mad[3] c_fsx c_fsy c_fsz c_vir[1] c_vir[4]
+thermo_modify format float %.17g
+run 0

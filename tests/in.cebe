@@ -1,0 +1,15 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 6.0
+pair_coeff      * *
+comm_modify     cutoff 6.0
+neighbor        0.5 bin
+
+compute cebe all mad/property/turbogap data/gap_files/CO.gap core_electron_be species C O
+dump d all custom 1 cebe.dump id c_cebe
+dump_modify d format float %.12f sort id
+run 0

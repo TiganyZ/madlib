@@ -1,0 +1,14 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+units           metal
+atom_style      full
+boundary        p p p
+read_data       data/dimers_split.data
+pair_style      lj/cut 8.0
+pair_coeff      * * 0.01 3.0
+bond_style      harmonic
+bond_coeff      1 25.0 1.13
+special_bonds   lj 0.0 1.0 1.0
+compute mu all mad/property/dipole charges 0.5 -0.5
+dump d all custom 1 mu.dump id mol proc c_mu[1] c_mu[2] c_mu[3]
+dump_modify d sort id format float %.14f
+run 0

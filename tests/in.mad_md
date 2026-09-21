@@ -1,0 +1,22 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute gr  all mad/pdf r 0.1 6.0 201 kde 0.15
+fix     mad all mad/xrd c_gr target data/xrd_target.dat q 1.04525 9.97006 201 &
+        output qFq species C O weighting xray gamma 0.0 20.0
+
+velocity all create 300.0 12345 mom yes
+fix     nve all nve
+fix     t   all langevin 300.0 300.0 0.1 48279
+
+thermo 50
+thermo_style custom step temp pe f_mad f_mad[2]
+thermo_modify format float %.8g
+run 500
