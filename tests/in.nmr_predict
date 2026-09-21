@@ -1,0 +1,17 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# Isotropic NMR shieldings of a succinic acid crystal, from ShiftML through the
+# python backend. ShiftML passes two messages over a 5 A neighbour list, so a
+# 10 A ghost shell is what makes the cluster the backend builds equal to the
+# periodic answer; comm_modify carries it.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/succinic.data
+pair_style      zero 10.0
+pair_coeff      * *
+comm_modify     cutoff 12.0
+compute         cs all mad/property/python mad_shiftml ncomp 1 cutoff 10.0
+dump            d all custom 1 nmr_cs.dump id type c_cs
+dump_modify     d format float %.8f sort id
+run 0

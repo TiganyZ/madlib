@@ -73,6 +73,14 @@ static std::vector<std::string> words(const std::string &s)
   return w;
 }
 
+// Fortran logicals, as TurboGAP writes them: .true. / .false.
+static bool fortran_true(const std::string &v)
+{
+  const std::string t = strip(v);
+  return !t.empty() && (t[0] == 'T' || t[0] == 't' ||
+                        (t[0] == '.' && t.size() > 1 && (t[1] == 'T' || t[1] == 't')));
+}
+
 static std::string dirname_of(const std::string &p)
 {
   const size_t s = p.find_last_of('/');
@@ -240,6 +248,7 @@ std::vector<MADGapBlock> MADGapFile::read(const std::string &path, const std::st
   bool inblock = false;
   MADGapBlock b;
   bool has_lp = false;
+  bool any_dipole = false, any_label = false;
 
   auto num = [&](const std::string &v) {
     return std::stod(strip(v));
@@ -288,8 +297,11 @@ std::vector<MADGapBlock> MADGapFile::read(const std::string &path, const std::st
     try {
       if (apply_soap_hyper(b, key, val)) {
         ;
+      } else if (key == "dipole_model") {
+        any_dipole = any_dipole || fortran_true(val);
       } else if (key == "local_property_labels") {
         b.label = strip(val);
+        any_label = true;
         has_lp = (b.label == label);
       } else if (key == "local_property_qs")
         b.file_qs = strip(val);
@@ -310,6 +322,16 @@ std::vector<MADGapBlock> MADGapFile::read(const std::string &path, const std::st
     }
   }
 
+  // Only when the file carries no local property at all: a potential can hold
+  // a dipole block beside local-property ones, and there the missing label is
+  // the missing label.
+  if (out.empty() && any_dipole && !any_label)
+    throw std::runtime_error(
+        "MADLIB: " + path +
+        " is a dipole model, not a local-property model. Its dipole is the gradient of a fitted "
+        "local energy with respect to the central atom's own position, which is a different "
+        "contraction of the same descriptor and is not implemented yet; a local property is the "
+        "kernel value itself and is what this style evaluates");
   if (out.empty())
     throw std::runtime_error("MADLIB: no soap_turbo block in " + path +
                              " carries a local property labelled '" + label + "'");
@@ -631,6 +653,19 @@ MADGapPotential MADGapFile::read_potential(const std::string &path,
     }
 
     if (!w.empty() && w[0] == "gap_end") {
+      // A dipole model's block looks exactly like an energy block -- same
+      // hyperparameters, same desc_sparse, same alphas_sparse -- and TurboGAP
+      // tells them apart by this one flag. Reading it as a potential gives a
+      // perfectly ordinary-looking energy that is a fitting artefact, so it is
+      // refused here rather than reported.
+      if (kind == "soap_turbo" && soap.dipole_model)
+        throw std::runtime_error(
+            "MADLIB: " + path +
+            " is a dipole model (dipole_model = .true.). Its local energy is a fitted scalar "
+            "whose gradient with respect to the central atom's own position is the local dipole; "
+            "TurboGAP never adds it to the energy or its gradient to the forces. There is no "
+            "potential here to evaluate");
+
       if (kind == "soap_turbo" && !soap.file_qs.empty()) {
         finalise_soap_energy(soap, dir);
         pot.soap.push_back(soap);
@@ -680,7 +715,9 @@ MADGapPotential MADGapFile::read_potential(const std::string &path,
       if (kind == "soap_turbo") {
         if (apply_soap_hyper(soap, key, val)) {
           ;
-        } else if (key == "zeta")
+        } else if (key == "dipole_model")
+          soap.dipole_model = fortran_true(val);
+        else if (key == "zeta")
           soap.zeta = num(val);
         else if (key == "delta")
           soap.delta = num(val);

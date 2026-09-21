@@ -37,7 +37,7 @@ def _coordination(pos, ei, ej, nlocal):
     return q[:nlocal]
 
 
-def mad_compute(positions, types, edge_i, edge_j, nlocal, ncomp):
+def mad_compute(positions, types, edge_i, edge_j, nlocal, ncomp, cell):
     pos, ei, ej = _unpack(positions, types, edge_i, edge_j, nlocal)
     q = _coordination(torch.from_numpy(pos.copy()),
                       torch.from_numpy(ei.astype(np.int64)),
@@ -45,7 +45,7 @@ def mad_compute(positions, types, edge_i, edge_j, nlocal, ncomp):
     return np.ascontiguousarray(q.detach().numpy(), dtype=np.float64)
 
 
-def mad_adjoint(positions, types, edge_i, edge_j, nlocal, ncomp, lam):
+def mad_adjoint(positions, types, edge_i, edge_j, nlocal, ncomp, lam, cell):
     pos, ei, ej = _unpack(positions, types, edge_i, edge_j, nlocal)
     weights = np.frombuffer(lam, dtype=np.float64)
 

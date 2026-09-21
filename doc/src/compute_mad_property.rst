@@ -52,6 +52,7 @@ Syntax
          module = name of an importable Python module
          *ncomp* value = 1 or 3 = components of the property
          *cutoff* value = neighbor list cutoff (distance units)
+         *pbc* value = *yes* to pass one periodic cell instead of a ghost cloud
 
        *mad/property/table*:
          *values* = one value per atom type
@@ -120,6 +121,32 @@ therefore requires an atom style with molecule IDs, and the dipole is then the
 sum of molecular dipoles built from intramolecular vectors, which does not move
 with the origin.  A periodic box without molecule IDs is an error.
 
+.. note::
+
+   This is not the dipole TurboGAP predicts.  TurboGAP uses no charges: its
+   dipole comes from a fitted model, a ``soap_turbo`` block flagged
+   ``dipole_model = .true.`` whose local energy is a fictitious scalar fitted so
+   that its gradient with respect to the central atom's own position is the
+   local dipole,
+
+   .. math::
+
+      \boldsymbol{\mu}_i = \frac{\partial E_i}{\partial \mathbf{r}_i}
+        = \zeta\delta^2 \sum_s \alpha_s\,
+          (\mathbf{q}_i \cdot \mathbf{Q}_s)^{\zeta-1}\,
+          \frac{\partial \mathbf{q}_i}{\partial \mathbf{r}_i}
+
+   This is the energy kernel's own contraction taken at the *self* pair of each
+   site rather than scattered over its neighbours, and with :math:`+\zeta\delta^2`
+   rather than :math:`-\zeta\delta^2`, a dipole being a gradient where a force
+   is its negative.  It is fitted to reference dipoles and is a different
+   quantity from a charge model's, not a coarser version of one.  No style here
+   evaluates it yet: *mad/property/turbogap* reads local-property blocks, and
+   given a dipole model it stops and says so.  A potential file flagged
+   ``dipole_model`` is likewise refused by ``pair_style turbogap``, since the
+   energy in it is a fitting artefact that would otherwise be reported as a
+   perfectly ordinary number.
+
 *mad/property/mliap* evaluates an :doc:`ML-IAP <pair_mliap>` model.  Such a
 model maps descriptors to a per-atom scalar; that scalar is normally an energy,
 but nothing in the machinery requires it to be, and the same linear, quadratic
@@ -138,16 +165,40 @@ expression.  The module must provide two functions,
 
 .. code-block:: python
 
-   mad_compute(positions, types, edge_i, edge_j, nlocal, ncomp) -> q
-   mad_adjoint(positions, types, edge_i, edge_j, nlocal, ncomp, lam) -> f
+   mad_compute(positions, types, edge_i, edge_j, nlocal, ncomp, cell) -> q
+   mad_adjoint(positions, types, edge_i, edge_j, nlocal, ncomp, lam, cell) -> f
 
-with *q* of shape (nlocal,) or (nlocal, ncomp), and *f* of shape (nall, 3) equal
-to the negative gradient of the weighted sum of *q* -- one backward pass for a
-torch model.  The positions cover owned atoms and ghosts, and a ghost carries
-the position of the periodic image it stands for, so the edge list and these
-coordinates fix the geometry completely; no cell and no boundary conditions are
-passed, and the model does not need to know about domain decomposition.  Arrays
-cross as memoryviews over LAMMPS's own storage and nothing is copied.
+with *q* of shape (nlocal,) or (nlocal, ncomp), and *f* the negative gradient of
+the weighted sum of *q* -- one backward pass for a torch model.  Arrays cross as
+memoryviews over LAMMPS's own storage and nothing is copied.
+
+There are two ways the module can be told where the atoms are, and *cell* says
+which it has been given.  By default *cell* is nine zeros, the positions cover
+owned atoms **and their ghosts** -- each ghost carrying the position of the
+periodic image it stands for -- and *f* is (nall, 3).  The edge list and those
+coordinates fix the geometry completely: no cell and no boundary conditions are
+needed, the model knows nothing about domain decomposition, and forces returned
+for ghosts are communicated back to their owners.  This is the general case and
+the only one that runs under MPI.  Its *cutoff* must reach the model's whole
+interaction range, which for a message-passing model is the neighbor-list cutoff
+times the number of layers, and the communication cutoff must cover that.
+
+With *pbc yes*, *cell* holds the three cell vectors, the positions are the owned
+atoms only, and a model that handles periodicity itself is left to.  This is for
+a long-ranged model on a small cell, where the ghost route is not merely slower:
+ShiftML passes two messages over a 5 Angstrom neighbor list, so a 28-atom
+molecular crystal needs a 10 Angstrom ghost shell, which is 3304 atoms -- 118
+copies of the cell to ask about 28 of them, and twenty times the wall time of
+passing the cell.  The two agree to :math:`10^{-4}` ppm, the model's own float32
+noise.  It runs on one rank, in a periodic box, over the *all* group, and says
+so rather than quietly meaning something else.
+
+In that mode *f* is (nlocal + 3, 3): the last three rows are
+:math:`-\partial E/\partial \mathbf{h}`, one per cell vector.  They are needed
+because the periodic images that carry the rest of :math:`\sum \mathbf{r}
+\otimes \mathbf{f}` are inside the model rather than in the atom arrays, so
+without them the pressure would be wrong rather than absent.  For a torch model
+they are the second output of the same backward pass.
 
 *mad/property/coord* gives a smooth coordination number, one below *r1*, a
 raised cosine to *r2*, and zero beyond.  It has an analytic gradient and needs no

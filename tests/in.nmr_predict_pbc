@@ -1,0 +1,14 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The same shieldings as in.nmr_predict, with the cell handed to the model
+# instead of 3304 ghosts standing in for it.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/succinic.data
+pair_style      zero 3.0
+pair_coeff      * *
+compute         cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+dump            d all custom 1 nmr_cs_pbc.dump id type c_cs
+dump_modify     d format float %.8f sort id
+run 0

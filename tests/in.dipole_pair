@@ -1,0 +1,13 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# A dipole model read as a potential. Its block carries the same
+# hyperparameters and the same sparse set as an energy block, so the arithmetic
+# runs on it and returns a number; the flag is the only thing that says the
+# number is a fitting artefact.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/water6.data
+pair_style      turbogap
+pair_coeff      * * ${dgap} O H
+run 0

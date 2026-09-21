@@ -60,6 +60,14 @@ dipole is stored every *N* steps, and its autocorrelation is transformed:
 The correlation is computed by the Wiener-Khinchin theorem over the whole
 stored buffer.  This fix predicts a spectrum; it applies no force.
 
+**The dipole is whatever the named compute produces**, and the only style that
+produces one today is :doc:`compute mad/property/dipole
+<compute_mad_property>`, which builds it from partial charges.  TurboGAP
+instead drives its IR from a fitted dipole model, a different quantity; see the
+note on that doc page.  The estimator here reproduces TurboGAP's ``ir_fft`` to
+machine precision, but that comparison gives both codes the same stored
+dipoles, so it verifies the spectrum and not the dipole feeding it.
+
 Two of its settings surprise people often enough that both are written into the
 header of the output file.
 

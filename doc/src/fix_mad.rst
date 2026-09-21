@@ -2,6 +2,7 @@
 .. index:: fix mad/sq
 .. index:: fix mad/xrd
 .. index:: fix mad/xps
+.. index:: fix mad/nmr
 
 fix mad/pdf command
 ===================
@@ -15,6 +16,9 @@ fix mad/xrd command
 fix mad/xps command
 ===================
 
+fix mad/nmr command
+===================
+
 Syntax
 """"""
 
@@ -23,7 +27,7 @@ Syntax
    fix ID group-ID style compute-ID keyword values ...
 
 * ID, group-ID are documented in :doc:`fix <fix>` command
-* style = *mad/pdf* or *mad/sq* or *mad/xrd* or *mad/xps*
+* style = *mad/pdf* or *mad/sq* or *mad/xrd* or *mad/xps* or *mad/nmr*
 * compute-ID = ID of the :doc:`compute mad/pdf <compute_mad_pdf>` or
   :doc:`compute mad/property <compute_mad_property>` command that supplies the
   prediction
@@ -59,11 +63,16 @@ Syntax
          *lp* value = *yes* or *no* = powder Lorentz-polarization factor
          *polarization* value = degree of polarization P of the incident beam
 
-       *mad/xps*:
-         *energy* values = emin emax nsamples
-         *sigma* value = broadening width of each per-atom value (energy units)
+       *mad/xps* and *mad/nmr*:
+         *energy* (or *range*) values = min max nsamples
+         *sigma* value = broadening width of each per-atom value
          *norm* value = *l2* or *area* or *none*
          *trunc* value = drop Gaussian tails past this many sigma
+
+       *mad/nmr* only, and one of the two is required:
+         *reference* value = a = convert a shielding to a shift, delta = a - sigma
+         *slope* value = b = use delta = a - b sigma instead
+         *convention* value = *shift* = the property is already on the target's axis
 
 Examples
 """"""""
@@ -77,6 +86,11 @@ Examples
 
    compute cebe all mad/property/turbogap CO.gap core_electron_be species C O
    fix xps all mad/xps c_cebe target xps.dat energy 280 300 201 sigma 0.4 gamma 100.0
+
+   group   protons type 1
+   compute cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+   fix h1 protons all mad/nmr c_cs target h1.dat range 0 20 201 sigma 0.5 &
+                              reference 30.96 gamma 50.0
 
 Description
 """""""""""
@@ -128,6 +142,31 @@ which selects the X-ray form factors or neutron scattering lengths.  The *window
 keyword applies a Lorch window that damps the ringing caused by truncating the
 transform; its cutoff is the extent of the *r* grid, which is not the same
 number as the neighbor list cutoff of the compute.
+
+*mad/nmr* broadens chemical shifts exactly as *mad/xps* broadens binding
+energies, and differs in two ways that are both about NMR rather than about the
+arithmetic.
+
+**Which nucleus is the fix's group.** A :math:`^{1}\mathrm{H}` and a
+:math:`^{13}\mathrm{C}` spectrum are two fixes over two groups reading one
+compute; the compute still covers every atom, because the model needs the whole
+structure to predict any part of it.
+
+**Shielding is not shift, and the difference is a reflection.**  A model
+predicts a shielding :math:`\sigma`; an experiment reports a shift
+:math:`\delta = a - b\sigma`, with *b* near one.  Broadening shieldings
+against a shift target therefore compares a spectrum with its own mirror image,
+and the *fit* keyword will obligingly rescale that into something that looks
+like a fit.  So *mad/nmr* will not start until told which it has been handed:
+*reference a* (with *slope b*, default one) converts, and *convention shift*
+says the property is already a shift.  There is no default, deliberately.
+
+Referencing constants are specific to the model and the level of theory it was
+fitted at, and taking one from a different source is a common way to get a
+spectrum that is uniformly wrong.  When the "measured" data is itself a
+prediction from the same model -- as in a test, or a structure search against a
+reference structure's computed spectrum -- both sides are shieldings and
+*convention shift* is the honest setting.
 
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""

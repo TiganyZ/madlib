@@ -484,3 +484,360 @@ set in both modes and one guard covers them.
 
 The `newton` leg compares energy and all six virial components between the two
 modes and fails if they are zero in both, since zero agrees with zero.
+
+## 25. A dipole model reads as a potential, and gives a number
+
+TurboGAP predicts a dipole from a *model*, never from charges. The model is a
+`soap_turbo` block flagged `dipole_model = .true.` whose local energy is a
+fictitious scalar fitted so that its gradient with respect to the central
+atom's own position is the local dipole:
+
+```
+mu_i = dE_i/dr_i = zeta delta^2 sum_s alpha_s (q_i.Q_s)^(zeta-1) d(q_i)/d(r_i)
+```
+
+which is `get_soap_dipole` in `gap.f90`: the energy kernel's own contraction,
+taken at the self pair rather than scattered over the neighbours, with
+`+zeta*delta^2` instead of `-zeta*delta^2` because a dipole is a gradient where
+a force is its negative. TurboGAP guards it carefully -- `gap_interface.f90`
+zeroes the virial and skips `get_soap_energy_and_forces` entirely for such a
+block, because "a dipole model's energy is a fitting artefact, not a physical
+energy".
+
+MADLIB's `compute mad/property/dipole` is `mu_i = q_i r_i` from partial charges.
+That is a different quantity, not an approximation to the above, and the docs
+had not said so.
+
+The dangerous half is the parser. A dipole block carries the same
+hyperparameters, the same `desc_sparse` and the same `alphas_sparse` as an
+energy block; the flag is the only thing that distinguishes them, and
+`read_potential` ignored unknown keys. So
+
+```lammps
+pair_coeff * * water_dipole.gap O H
+```
+
+ran, and reported `PotEng = 2.6949838` on a six-atom water frame -- an entirely
+ordinary-looking energy, and meaningless. The flag is now read and both entry
+points refuse the file by name: the potential reader because there is no energy
+in it, and the local-property reader because a dipole is a different
+contraction of the descriptor rather than a missing label.
+
+Nothing is in the way of the real backend. `build_batches` already puts the
+self pair first for every site with `rjs = 0`, which is exactly what
+`soap_cart_der` needs to give `d(soap_i)/d(r_i)`; what is missing is the
+contraction and a shim entry for it.
+
+The oracle for it is already sitting in the data:
+`water_dipole/water_dipole_tnep_converted_test.xyz` carries a reference
+`mu="..."` in every frame header, and `out_quip_predict` beside it is what QUIP
+predicts for the same frames from the same model.
+
+## 26. A torch model segfaults inside LAMMPS, in OpenBLAS
+
+ShiftML through `compute mad/property/python` died on the first forward pass:
+
+```
+Caught signal 11 (Segmentation fault: address not mapped to object at address 0x148)
+#9  0x0000000000000148 in ?? ()
+#10 sgemm_batch_thread ()            from /lib64/libopenblas.so.0
+#11 cblas_sgemm_batch ()             from /lib64/libopenblas.so.0
+#12 at::native::mkl_gemm_batched(...) from torch/lib/libtorch_cpu.so
+```
+
+The same module, the same model and the same 3304-atom cluster run clean in a
+standalone interpreter, so nothing about the model or the binding is wrong.
+
+`libtorch_cpu.so` carries its own MKL and **defines** `cblas_sgemm_batch`;
+`/lib64/libopenblas.so.0` defines it too, and `lmp` links that one directly for
+soap_turbo's LAPACK. The system library is therefore in the global scope first,
+so when the embedded interpreter dlopens libtorch_cpu, torch's internal call is
+interposed onto OpenBLAS's batched routine -- which is not the one its caller
+was compiled against, and jumps through a null pointer.
+
+`OPENBLAS_NUM_THREADS=1` does not help; the path is chosen by torch, not by the
+thread count. What works is putting torch's definition in the global scope
+first:
+
+```bash
+LD_PRELOAD=$(python3 -c 'import torch,os;print(os.path.dirname(torch.__file__))')/lib/libtorch_cpu.so
+```
+
+LAMMPS's own BLAS calls then resolve to torch's MKL, which is fine and is
+usually faster. Nothing here is specific to ShiftML: any torch model reaching
+`bmm`/`matmul` hits it, which is most of them. The reason the existing `torch`
+leg never did is that its model is a coordination number -- norms and elementwise
+ops, no gemm.
+
+## 27. A ghost cloud is the wrong way to feed a long-ranged model a small cell
+
+`compute mad/property/python` hands a model the owned atoms and their ghosts and
+no cell. That is the right general contract -- it needs no boundary conditions,
+knows nothing about domain decomposition, and is the only form that survives
+MPI. It is also, for a long-ranged model on a small cell, absurd.
+
+ShiftML asks for a 5 A neighbour list and passes two messages over it, so its
+interaction range is 10 A. Succinic acid's cell is 6.9 x 7.0 x 5.3 A. Reaching
+10 A therefore takes `comm_modify cutoff 12.0`, and LAMMPS then carries 3304
+atoms to answer a question about 28: 118 copies of the cell.
+
+Measured, one forward and one backward pass:
+
+```
+periodic, 28 atoms            1.48 s
+cluster, 8 A ghost shell      7.54 s   (744 atoms)
+cluster, 10 A ghost shell    12.17 s   (1202 atoms)
+cluster, 12 A ghost shell    17.58 s   (1808 atoms)
+```
+
+and in LAMMPS the whole `run 0` went from 21 s to 1 s. `pbc yes` passes the
+three cell vectors and the owned atoms instead, and the two agree to 9.2e-05
+ppm, which is the model's own float32 noise. The convergence with shell size is
+exactly what the 10 A range predicts: 1.1 ppm at 6 A, 6.1e-02 at 8 A, 1.0e-03
+at 10 A, 1.5e-04 at 12 A.
+
+The cost of the shortcut is the virial. `sum_a f_a (x) r_a` over owned atoms is
+not the virial of a periodic system -- the images carrying the rest of it are
+inside the model now, not in the atom arrays. So the module returns three more
+rows, `-dE/dh`, and
+
+    W_ab = sum_i r_ia f_ib + sum_c h_ca (-dE/dh_c)_b
+
+For a torch model that is the second output of the same backward pass, and
+metatomic propagates it: the neighbour list's shift vectors carry `h`. Without
+it the pressure would be wrong rather than absent, which is the worse failure.
+
+## 28. Broadening sets the stiffness of a spectral bias, not just its resolution
+
+The first biased anneal of a scrambled succinic acid cell went to 26742 K on the
+second thermo line. Nothing was wrong with the forces: the independent reference
+agreed with them to 4e-06.
+
+`sigma` was 0.5 ppm, chosen to match ShiftML's 1H RMSE of 0.4. But the bias
+force carries `(x_l - q_i)/sigma^2` from differentiating the Gaussian, so the
+loss surface stiffens as `1/sigma^2` while the spectrum only sharpens as
+`1/sigma`. On a structure whose shieldings are nowhere near the target, that
+came to 131 eV/A per atom against a potential whose own forces are a few.
+
+At sigma 1.5 ppm the same configuration gives 14.8 eV/A, and the run is stable.
+So the broadening of a bias is chosen twice over: narrow enough to keep the
+features that distinguish structures, wide enough that the gradient is a force
+and not a kick. A sharp experimental linewidth is a reason to fit narrow at the
+END of a search, not to start there.
+
+## 29. A gap file with no dispersion cannot hold a molecular crystal, and NPT says so loudly
+
+`pair_style turbogap` with the CHO potential reports 31 GPa on the experimental
+succinic acid cell. That reads like a compressed crystal. It is not. Released
+under `fix npt tri 1.0 1.0`:
+
+```
+step      P (bar)     volume (A^3)   density
+   0      313945           256        1.53
+ 500       61086          1060        0.37
+2000         329        340000        0.0012
+6000           0.6     2.1e+07        1.9e-05
+```
+
+The crystal sublimates. A molecular crystal is held by hydrogen bonding and
+dispersion; the 31 GPa is Pauli repulsion with nothing pulling back, so at 1 bar
+the molecules simply fly apart.
+
+The missing term is the one the reader already documents as absent. TurboGAP
+takes its TS/MBD dispersion from its *input file*, not from the `.gap`, so there
+is no block here to read and `MADGapFile` cannot supply it -- see the "Genuinely
+not handled" note in the README. Nothing is wrong with the four terms that are
+read; the potential as MADLIB can see it is simply not the potential TurboGAP
+was running.
+
+What this costs: any constant-pressure work with a `.gap` whose TurboGAP run
+used `energy_vdw` is meaningless, and it is meaningless in a way that constant
+volume hides completely -- at fixed cell the same potential gives a stable
+300 K trajectory with the right bond topology for picoseconds. The pressure is
+the only diagnostic that shows it, and only if someone looks.
+
+For an organic molecular crystal, MACE-OFF through `pair_style symmetrix/mace`
+carries dispersion (it is fitted at wB97M-D3(BJ)) and is what a free-cell run
+needs instead.
+
+## 30. A spectrum can be fitted by the wrong structure, and the control is how you find out
+
+Longer anneal, cell free, MACE-MP small-omat-0, gamma 10 on 1H and 13C. The bias
+fits far better than at fixed volume -- 1H dissimilarity 1.275 -> 0.0685, a
+factor of 19, against a control that ends at 0.742 from the same trajectory.
+
+Then look at where the hydrogens are. Nearest heavy atom of each of the twelve:
+
+```
+target    4 O-H, 8 C-H      O1.00 O1.00 O1.01 O1.01 C1.09 x8
+biased    7 O-H, 5 C-H      O0.96 x3 O0.97 O1.04 x3 C1.07 C1.09 C1.10 C1.11 C1.16
+control   4 O-H, 8 C-H      O0.98 O0.99 O1.01 O1.02 C1.09 C1.10 x5 C1.11 x2
+```
+
+The biased structure has moved three protons from carbon to oxygen. Succinic
+acid has not been rebuilt; something with the wrong hydrogen chemistry has, and
+its 1H spectrum matches the target better than the chemically correct control's
+does. The four short O-H give the 16 ppm line and the three long ones sit with
+the five C-H under the 28 ppm line, so the two-group pattern comes out right for
+the wrong reason.
+
+Nothing is wrong with the bias. A 1H spectrum of this molecule is two lines and
+a 13C spectrum is two more: four numbers, against 84 degrees of freedom. The
+data does not determine the structure, and at gamma 10 the restraint is strong
+enough to buy agreement with those four numbers at the cost of the chemistry --
+0.56 eV of it, measured against the control's potential energy. This is the
+failure the README warns about under gamma sizing, with a control to prove it
+rather than a warning to heed.
+
+What would help, in order: more observables (17O is free here -- the target is
+already built -- and the shielding ANISOTROPY is three more numbers per site
+that ShiftML already predicts and mad/nmr does not yet use); a smaller gamma; and
+a potential that puts the density right, since both runs ended 52% expanded and
+the bias's stress did not pull it back.
+
+The one unambiguous reading: **report the per-atom property, not only the
+spectrum.** `compute mad/property/*` is dumpable for exactly this reason, and
+the twelve numbers above took one dump to find where the dissimilarity alone
+said the fit was excellent.
+
+## 31. `thermo_style` throws away `thermo_modify`, and a live run then looks dead
+
+A deck that sets `thermo_modify flush yes` early, installs the bias fixes, and
+then switches to a `thermo_style custom` naming them loses the flush: LAMMPS
+resets every `thermo_modify` setting to its default when the style is replaced.
+The log then sits in a stdio buffer and is written in whole blocks, so on a slow
+run -- 0.4 s a step, a thermo line every 500 -- it can be fifteen minutes stale
+while the job is perfectly healthy.
+
+Two consequences, both of which cost time here. A watchdog keyed on the log's
+mtime declares a stall that is not happening. And any `-var` sweep read back
+from logs is missing its tail until the run exits.
+
+Put the `thermo_modify flush yes` **after** the last `thermo_style`, and key a
+watchdog on `fix mad/*`'s own spectrum file instead: `write_every` flushes it,
+and its `# step N ... rel_error X` header is the progress you actually want.
+
+Unrelated but adjacent: do not grep a LAMMPS log case-insensitively for `error`.
+The deck's own header comments are echoed into the log verbatim, so prose like
+"its density error is handled by the pressure" matches. Anchor on `^ERROR`.
+
+## 32. A third observable does what a stronger gamma cannot
+
+Same cell, same seed, same pressure, same 2 x 6000 steps, same gamma 10 as #30.
+The only change is a third channel, `fix mad/nmr` on the eight oxygens, target
+built from the same pristine prediction. Dissimilarity on each channel's own
+grid and sigma, from `probe_bias.sh`:
+
+```
+                       1H       13C      17O
+scrambled start      0.547    1.685    1.171
+biased on 1H,13C     0.008    0.145    1.952      <- #30
+biased on 1H,13C,17O 0.023    0.105    0.060
+control, gamma 0     0.349    0.665    1.155
+```
+
+The second row is the whole argument for doing this. Fitting two observables
+drove the third **past the scrambled cell it started from** -- 1.95 against
+1.17 -- while the control, which fitted nothing, left oxygen where it found it.
+That is not a spectrum failing to improve; it is a spectrum being actively
+spent to pay for the other two.
+
+Add it as a restraint and the trade reverses. 17O falls 32-fold, 13C improves,
+and **1H gets worse** (0.008 -> 0.023). The bias can no longer buy agreement in
+hydrogen with the wrong hydrogen chemistry, and the worse number is the good
+sign. In bonds and in nearest-heavy-atom distances:
+
+```
+                     C-C  C-H  C-O  H-O
+target                6    8    8    4      4 O-H at 1.00-1.01, 8 C-H at 1.09
+biased on 1H,13C      7    5    6    7      three protons moved C -> O
+biased on 1H,13C,17O  5    7    8    5      one did
+control, gamma 0      6    8    7    4
+```
+
+Seven of the eight oxygens land in the two target environments (-67,-61,-56 and
+74,86,91,99 ppm against the target's -64..-59 and 86..90); one sits at +268 and
+takes a carbon and a proton with it. One defect site, where two channels left
+three.
+
+The cell moved too, for the first time: 362.6 A^3 against the control's 387.9,
+so the data pulled 10 points of the density error back. It costs 1.45 eV of
+MACE energy relative to the control against #30's 0.57, but this potential puts
++65 kbar on the experimental cell, so on it being closer to the true density
+*is* being higher in energy. The two are not separable here and the eV should
+not be read as the bias straining the structure by that much.
+
+Two things worth keeping about the 17O channel itself. Its grid is -500..400
+ppm where the target only spans -64..+90: a shielding outside the grid lands in
+no bin and is invisible to the loss as well as to the force, so the wide grid is
+what makes a wrecked oxygen count against the fit instead of silently vanishing
+from it. And sigma 20 ppm was chosen against the 150 ppm between the C=O and
+O-H environments -- 40 would merge them and lose exactly the contrast that
+catches a migrating proton. The reach worry (a stray at -250 is 10 sigma from
+any target feature and feels nothing) did not bite, because at 1000 K the
+oxygens pass back through the reachable region constantly.
+
+The general form: **the cure for a bias that fits the wrong structure is another
+observable, not a smaller gamma.** Same gamma, one more channel, and the failure
+in #30 mostly closed.
+
+## 33. The span is real information, and six channels dissociated the crystal
+
+The shielding tensor is already in the forward pass: ShiftML's nine outputs are
+a rank-2 tensor in an irreducible basis and the Cartesian form is a fixed 9x9
+map of them, so `mad_shiftml_span` reads the graph `mad_shiftml` built and costs
+a backward pass, not a forward one. Span -- largest principal value minus
+smallest -- was chosen over the Haeberlen anisotropy and the skew because it
+uses only the extreme eigenvalues, and those coincide only when all three do.
+The others are defined by an ordering that swaps whenever two principal values
+cross, which puts a discontinuity in the force for no physical reason.
+
+It is not a restatement of the isotropic shielding. On the pristine crystal the
+twelve protons split 8 + 4 by span (C-H at 7-11 ppm, O-H at 26-28) and 4 + 8 by
+isotropic shielding (O-H at 16, C-H at 28.5): the two spectra are satisfied by
+opposite multiplicities.
+
+And #32's lesson recurred one level down. The three-isotropic-channel structure
+has a 13C SPAN dissimilarity of 1.08 against the scrambled cell's own 0.70 --
+its carbon spans are 14, 27, 27, 64, 71, 126, 149, 170 where the target is a
+tight 39x4 + 171x4. The tensor shapes had been spent to buy the isotropic lines.
+
+Adding all three span channels at gamma 2, keeping the isotropic gamma 10:
+
+```
+                  1H     13C     17O    1H sp  13C sp  17O sp   total
+scrambled start  0.547  1.685   1.171   0.570  0.697   1.935    6.61
+3 iso channels   0.023  0.105   0.060   0.135  1.084   1.227    2.63
+6 channels       0.015  0.420   0.063   0.069  0.200   0.696    1.46
+control          0.349  0.665   1.155   0.513  0.881   1.455    5.02
+```
+
+Five of six improved and the total fell 44%; the carbon span fell 1.08 -> 0.20.
+The restraint works.
+
+**The structure did not.** 22 bonds against the target's 26, the C-C skeleton
+down to 4 from 6, one carbon left singly coordinated, and a free H2 molecule --
+two protons whose nearest heavy atom is 1.6 and 2.3 A away. The cell ended at
+514 A^3, +101%, against 362 for three channels and 388 for the control, and the
+structure sits 6.5 eV above the control on MACE. 13C isotropic got worse
+(0.105 -> 0.420) for the same reason the skeleton broke.
+
+The volume is the proximate cause and it is worth stating plainly: **a shielding
+is a local quantity, so at twice the experimental volume a spectrum can be
+satisfied by isolated fragments.** The six channels are not wrong to be
+satisfied; they simply do not constrain density, and nothing else in the run
+did either, because MACE-MP wants +72% at 1 bar on its own (#29).
+
+Two caveats on attribution. The six-channel deck has an extra 1500-step
+switch-on leg the three-channel one did not, so protocol and channel count are
+confounded; separating them needs a gamma 0 run through the same protocol.
+And the switch-on is not optional: six channels arriving at full strength put
+33 eV into a 28-atom cell and reached 9247 K in eighty steps. A gamma ramp only
+delayed it to 9308 K -- the fix was halving the added restraint, not softening
+its arrival. Finite-differencing the span adjoint first (3.7e-4 relative, error
+growing as 1/h, i.e. float32 round-off) is what ruled out a noisy gradient as
+the cause, since a noisy force heats a run exactly as a too-strong one does.
+
+The next thing to fix is not the observables. It is the density: run at the
+6.5 GPa where MACE-MP reproduces the experimental volume, or get a potential
+that does not need the crutch.

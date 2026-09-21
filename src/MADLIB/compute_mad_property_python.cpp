@@ -19,6 +19,7 @@
 
 #include "atom.h"
 #include "comm.h"
+#include "domain.h"
 #include "error.h"
 #include "force.h"
 #include "memory.h"
@@ -29,6 +30,7 @@
 #include "update.h"
 
 #include <cstring>
+#include <string>
 
 #ifdef MADLIB_PYTHON
 #include <Python.h>
@@ -40,8 +42,8 @@ using namespace LAMMPS_NS;
 /* ---------------------------------------------------------------------- */
 
 ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char **arg) :
-    ComputeMADProperty(lmp, narg, arg), rcut(-1.0), nmax_q(0), list(nullptr), py_module(nullptr),
-    py_compute(nullptr), py_adjoint(nullptr)
+    ComputeMADProperty(lmp, narg, arg), rcut(-1.0), nmax_q(0), pbc_mode(0), list(nullptr),
+    py_module(nullptr), py_compute(nullptr), py_adjoint(nullptr)
 {
 #ifndef MADLIB_PYTHON
   error->all(FLERR,
@@ -60,14 +62,35 @@ ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char *
     } else if (strcmp(arg[iarg], "cutoff") == 0) {
       rcut = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "pbc") == 0) {
+      if (strcmp(arg[iarg + 1], "yes") == 0)
+        pbc_mode = 1;
+      else if (strcmp(arg[iarg + 1], "no") == 0)
+        pbc_mode = 0;
+      else
+        error->all(FLERR, "compute mad/property/python pbc must be yes or no");
+      iarg += 2;
     } else {
       error->all(FLERR, "Unknown compute mad/property/python keyword {}", arg[iarg]);
     }
   }
   if ((ncomp != 1) && (ncomp != 3))
     error->all(FLERR, "compute mad/property/python supports ncomp 1 or 3, not {}", ncomp);
-  if (rcut <= 0.0)
+  if (rcut <= 0.0 && !pbc_mode)
     error->all(FLERR, "compute mad/property/python requires a positive cutoff");
+
+  // Handing the model one periodic cell means the cell has to be the whole
+  // system, so there is nothing to decompose and nothing outside the group.
+  if (pbc_mode) {
+    if (comm->nprocs > 1)
+      error->all(FLERR,
+                 "compute mad/property/python pbc yes passes one periodic cell to the model, so "
+                 "it runs on one rank only; drop it and give a cutoff reaching the model's "
+                 "interaction range instead");
+    if (igroup != 0)
+      error->all(FLERR, "compute mad/property/python pbc yes needs the all group");
+  }
+  for (int i = 0; i < 9; i++) cellbuf[i] = 0.0;
 
   size_peratom_cols = (ncomp == 1) ? 0 : ncomp;
 
@@ -92,8 +115,9 @@ ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char *
   if (!py_adjoint) fail("the module has no mad_adjoint");
 
   if (comm->me == 0)
-    utils::logmesg(lmp, "compute {}: python model '{}', {} component(s), cutoff {:.4g}\n", id,
-                   module_name, ncomp, rcut);
+    utils::logmesg(lmp, "compute {}: python model '{}', {} component(s), {}\n", id, module_name,
+                   ncomp, pbc_mode ? std::string("one periodic cell") :
+                                     fmt::format("cutoff {:.4g}", rcut));
 #endif
 }
 
@@ -128,6 +152,14 @@ void ComputeMADPropertyPython::fail(const char *what)
 
 void ComputeMADPropertyPython::init()
 {
+  if (pbc_mode) {
+    // here rather than in the constructor: change_box can make a box
+    // non-periodic after the compute is defined.
+    if (!domain->xperiodic || !domain->yperiodic || !domain->zperiodic)
+      error->all(FLERR, "compute mad/property/python pbc yes needs a periodic box");
+    return;
+  }
+
   const double skin = neighbor->skin;
   double cutghost;
   if (force->pair)
@@ -158,11 +190,34 @@ void ComputeMADPropertyPython::init_list(int /*id*/, NeighList *ptr)
 
 void ComputeMADPropertyPython::build_edges()
 {
-  neighbor->build_one(list);
-
   double **x = atom->x;
   const int *type = atom->type;
   const int *mask = atom->mask;
+
+  if (pbc_mode) {
+    const int nlocal = atom->nlocal;
+    edge_i.clear();
+    edge_j.clear();
+    pos.resize((size_t) nlocal * 3);
+    type_flat.resize(nlocal);
+    for (int i = 0; i < nlocal; i++) {
+      pos[3 * i + 0] = x[i][0];
+      pos[3 * i + 1] = x[i][1];
+      pos[3 * i + 2] = x[i][2];
+      type_flat[i] = type[i];
+    }
+    // rows a, b, c of the LAMMPS cell, which is lower triangular
+    cellbuf[0] = domain->xprd;
+    cellbuf[3] = domain->xy;
+    cellbuf[4] = domain->yprd;
+    cellbuf[6] = domain->xz;
+    cellbuf[7] = domain->yz;
+    cellbuf[8] = domain->zprd;
+    return;
+  }
+
+  neighbor->build_one(list);
+
   const int nall = atom->nlocal + atom->nghost;
   const double rcutsq = rcut * rcut;
 
@@ -203,32 +258,37 @@ void ComputeMADPropertyPython::call_python(void *fn, const double *lam, double *
 {
 #ifdef MADLIB_PYTHON
   const int nlocal = atom->nlocal;
-  const int nall = nlocal + atom->nghost;
+  // pbc mode sends the owned atoms and the cell; otherwise the ghosts too
+  const int nsent = pbc_mode ? nlocal : nlocal + atom->nghost;
   const int nedge = (int) edge_i.size();
 
   PyObject *mv_pos = PyMemoryView_FromMemory((char *) pos.data(),
-                                             (Py_ssize_t) nall * 3 * sizeof(double), PyBUF_READ);
+                                             (Py_ssize_t) nsent * 3 * sizeof(double), PyBUF_READ);
   PyObject *mv_typ = PyMemoryView_FromMemory((char *) type_flat.data(),
-                                             (Py_ssize_t) nall * sizeof(int), PyBUF_READ);
+                                             (Py_ssize_t) nsent * sizeof(int), PyBUF_READ);
   PyObject *mv_ei = PyMemoryView_FromMemory((char *) edge_i.data(),
                                             (Py_ssize_t) nedge * sizeof(int), PyBUF_READ);
   PyObject *mv_ej = PyMemoryView_FromMemory((char *) edge_j.data(),
                                             (Py_ssize_t) nedge * sizeof(int), PyBUF_READ);
+
+  PyObject *mv_cell = PyMemoryView_FromMemory((char *) cellbuf, 9 * sizeof(double), PyBUF_READ);
 
   PyObject *args;
   if (lam) {
     PyObject *mv_lam = PyMemoryView_FromMemory((char *) lam,
                                                (Py_ssize_t) nlocal * ncomp * sizeof(double),
                                                PyBUF_READ);
-    args = Py_BuildValue("(OOOOiiO)", mv_pos, mv_typ, mv_ei, mv_ej, nlocal, ncomp, mv_lam);
+    args = Py_BuildValue("(OOOOiiOO)", mv_pos, mv_typ, mv_ei, mv_ej, nlocal, ncomp, mv_lam,
+                         mv_cell);
     Py_XDECREF(mv_lam);
   } else {
-    args = Py_BuildValue("(OOOOii)", mv_pos, mv_typ, mv_ei, mv_ej, nlocal, ncomp);
+    args = Py_BuildValue("(OOOOiiO)", mv_pos, mv_typ, mv_ei, mv_ej, nlocal, ncomp, mv_cell);
   }
   Py_XDECREF(mv_pos);
   Py_XDECREF(mv_typ);
   Py_XDECREF(mv_ei);
   Py_XDECREF(mv_ej);
+  Py_XDECREF(mv_cell);
   if (!args) fail("could not build the argument tuple for");
 
   PyObject *res = PyObject_CallObject(PY(fn), args);
@@ -303,28 +363,53 @@ void ComputeMADPropertyPython::adjoint(double **lambda, double *virial)
 
   const int nlocal = atom->nlocal;
   const int nall = nlocal + atom->nghost;
+  const int nforce = pbc_mode ? nlocal : nall;
+  double dedh[9] = {0.0};
+
   if (nlocal > 0) {
     lam_flat.resize((size_t) nlocal * ncomp);
     for (int i = 0; i < nlocal; i++)
       for (int c = 0; c < ncomp; c++) lam_flat[i * ncomp + c] = lambda[i][c];
 
-    std::vector<double> f((size_t) nall * 3, 0.0);
-    call_python(py_adjoint, lam_flat.data(), f.data(), nall * 3);
-    for (int i = 0; i < nall; i++)
+    // three rows more in pbc mode: -dE/dh, one per cell vector
+    const int nrow = nforce + (pbc_mode ? 3 : 0);
+    std::vector<double> f((size_t) nrow * 3, 0.0);
+    call_python(py_adjoint, lam_flat.data(), f.data(), nrow * 3);
+    for (int i = 0; i < nforce; i++)
       for (int d = 0; d < 3; d++) fadj[i][d] += f[3 * i + d];
+    if (pbc_mode)
+      for (int k = 0; k < 9; k++) dedh[k] = f[3 * nforce + k];
   }
 
   // sum_a f_a (x) r_a over owned atoms AND ghosts, whose coordinates are the
   // imaged ones. That is the same quantity virial_fdotr_compute forms, and it
   // has to be taken before the ghost forces are folded back.
   double **x = atom->x;
-  for (int i = 0; i < nall; i++) {
+  for (int i = 0; i < nforce; i++) {
     virial[0] += fadj[i][0] * x[i][0];
     virial[1] += fadj[i][1] * x[i][1];
     virial[2] += fadj[i][2] * x[i][2];
     virial[3] += 0.5 * (fadj[i][0] * x[i][1] + fadj[i][1] * x[i][0]);
     virial[4] += 0.5 * (fadj[i][0] * x[i][2] + fadj[i][2] * x[i][0]);
     virial[5] += 0.5 * (fadj[i][1] * x[i][2] + fadj[i][2] * x[i][1]);
+  }
+
+  // In pbc mode the images that carry the rest of r (x) f are inside the model,
+  // not in the atom arrays, and what stands in for them is h^T (-dE/dh).
+  if (pbc_mode) {
+    const double h[3][3] = {{domain->xprd, 0.0, 0.0},
+                            {domain->xy, domain->yprd, 0.0},
+                            {domain->xz, domain->yz, domain->zprd}};
+    double w[3][3] = {{0.0}};
+    for (int a = 0; a < 3; a++)
+      for (int b = 0; b < 3; b++)
+        for (int c = 0; c < 3; c++) w[a][b] += h[c][a] * dedh[3 * c + b];
+    virial[0] += w[0][0];
+    virial[1] += w[1][1];
+    virial[2] += w[2][2];
+    virial[3] += 0.5 * (w[0][1] + w[1][0]);
+    virial[4] += 0.5 * (w[0][2] + w[2][0]);
+    virial[5] += 0.5 * (w[1][2] + w[2][1]);
   }
 
   scatter_adjoint();

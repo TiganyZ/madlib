@@ -52,6 +52,10 @@ struct MADGapBlock {
   std::string compress_mode = "none";
   std::string compress_file = "none";
 
+  // dipole_model = .true.: the block's "energy" is a fitting artefact whose
+  // gradient is the local dipole, not an energy. Read so it can be refused.
+  bool dipole_model = false;
+
   // the local-property model itself
   std::string label;
   std::string file_qs, file_alphas;

@@ -1,0 +1,15 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# No convention stated. A shielding broadened against a shift target is the
+# mirror image of the right answer, and the scale fit would hide it, so this
+# must stop rather than run.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/succinic.data
+pair_style      zero 3.0
+pair_coeff      * *
+group           gH type 1
+compute         cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+fix             mad gH mad/nmr c_cs target nmr_H.dat range 5.0 40.0 141 sigma 1.5 gamma 1.0
+run 0

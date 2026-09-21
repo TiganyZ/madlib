@@ -177,15 +177,30 @@ that `carbon.gap` and the CLi potentials use is exercised, as is
 
 **Genuinely not handled**: the TS/MBD dispersion correction, which TurboGAP
 configures from its *input file* rather than from the `.gap` (`energy_vdw` in
-its trajectory header) and which has no block here to read; and a dipole model,
-which carries no energy to contribute. A dispersion term written as a
-`core_pot` block -- which is how `carbon.gap` ships one, commented out -- is
-read like any other `core_pot`.
+its trajectory header) and which has no block here to read. A dispersion term
+written as a `core_pot` block -- which is how `carbon.gap` ships one, commented
+out -- is read like any other `core_pot`.
+
+That omission is invisible at constant volume and fatal at constant pressure.
+A CHO potential read this way gives a stable 300 K trajectory of a succinic acid
+crystal with the right bond topology for picoseconds -- and reports 31 GPa,
+which is not a compressed crystal but Pauli repulsion with nothing pulling back.
+Released under `fix npt`, the cell goes from 256 to 2.1e7 A^3 and the crystal
+sublimates. See NOTES.md #29. For constant-pressure work on a molecular crystal,
+use a potential that carries its own dispersion.
+
+**Refused, on purpose**: a dipole model. A block flagged `dipole_model = .true.`
+is written exactly like an energy block -- same hyperparameters, same
+`desc_sparse`, same `alphas_sparse` -- and only that flag says its "energy" is a
+fitting artefact whose gradient is a dipole. Read as a potential it gives a
+perfectly ordinary-looking number: `water_dipole.gap` on a six-atom water frame
+reports `2.69 eV`, which means nothing. So the flag is read and the file is
+rejected, with a message saying what it is.
 
 ### `compute ID group mad/property/*`
 
 A per-atom quantity and its adjoint. XPS needs core-electron binding energies;
-IR will need local dipoles. Two backends so far:
+IR needs local dipoles:
 
 ```lammps
 # a fitted TurboGAP GPR -- an existing .gap file, used as it stands
@@ -217,6 +232,42 @@ in a periodic box** -- it depends on the origin and on which images the atoms
 happen to be wrapped into -- so a periodic run needs molecule IDs, and gets the
 sum of molecular dipoles built from intramolecular vectors; a periodic box
 without them is refused rather than given a plausible number.
+
+**This is not the dipole TurboGAP predicts, and there is no backend here that
+is.** TurboGAP has no charges in the picture. Its dipole comes from a fitted
+model -- a `soap_turbo` block flagged `dipole_model = .true.`, whose local
+energy is a fictitious scalar fitted so that its gradient with respect to the
+central atom's *own* position is the local dipole:
+
+```
+mu_i = dE_i/dr_i = zeta delta^2 sum_s alpha_s (q_i.Q_s)^(zeta-1) d(q_i)/d(r_i)
+```
+
+(`get_soap_dipole`, `lib/madlib/turbogap/gap.f90`). It is the energy kernel's
+own contraction, taken at the *self* pair of each site rather than scattered
+over its neighbours, and with `+zeta delta^2` rather than `-zeta delta^2`
+because a dipole is a gradient where a force is its negative. The quantity is
+fitted to reference dipoles; a charge model is not an approximation to it.
+
+Everything that backend would need is already in place -- the descriptor pass
+puts the self pair first for every site, which is exactly `d(soap_i)/d(r_i)` --
+so what is missing is the contraction and a shim entry for it, not the
+machinery. Until then, an IR spectrum from MADLIB is a charge-model spectrum,
+and `compute mad/property/turbogap` given a dipole model says so rather than
+guessing at a local property that is not in the file.
+
+`python` hands a module the geometry and takes back the property and one
+backward pass. Two ways to say where the atoms are: by default the owned atoms
+**and their ghosts** plus an edge list, which needs no cell, knows nothing about
+boundaries and is the only form that works under MPI; or `pbc yes`, the owned
+atoms and the three cell vectors, for a model that handles periodicity itself.
+The second exists because the first is absurd for a long-ranged model on a small
+cell -- ShiftML reaches 10 A, so this 28-atom molecular crystal needs 3304
+ghosts, 118 copies of the cell to ask about 28 atoms, and twenty times the wall
+time. They agree to 1e-4 ppm. In `pbc` mode the module also returns `-dE/dh`,
+because the images carrying the rest of `sum r (x) f` are inside the model
+rather than in the atom arrays, and without it the pressure would be wrong
+rather than absent.
 
 `coord` has an analytic gradient and no data files, which is what lets the whole
 XPS chain be finite-differenced before any ML model is involved. `table` has no
@@ -252,6 +303,47 @@ Also registered as `fix mad/spectrum`, since nothing in it is specific to
 photoemission -- any observable that is a broadened sum over a per-atom scalar
 fits.
 
+### `fix ID group mad/nmr <compute> [keyword value ...]`
+
+The same arithmetic on chemical shifts, with the two things that make NMR NMR.
+
+**Which nucleus is the fix's group.** A 1H and a 13C spectrum are two fixes over
+two groups reading one compute -- the compute still covers every atom, because
+the model needs the whole structure to predict any part of it.
+
+**Shielding is not shift, and the difference is a reflection.** A model predicts
+a shielding `sigma`; an experiment reports a shift `delta = a - b sigma`. Broaden
+one against the other and you are fitting a spectrum to its own mirror image,
+which `fit yes` will obligingly rescale into something that looks like a fit. So
+the convention is asked for rather than assumed, and there is no default:
+
+| keyword | default | meaning |
+|---|---|---|
+| `range` | **required** | `<min> <max> <nsamples>`, ppm |
+| `sigma` | `0.4` | broadening, ppm. **This sets the stiffness of the bias**: the force goes as `1/sigma^2`, and 0.5 ppm on a scrambled cell gives 131 eV/A |
+| `reference` | | `a` in `delta = a - b sigma` |
+| `slope` | `1.0` | `b` in the same |
+| `convention` | | `shift` = the property already is one |
+
+plus everything `mad/xps` takes. A referencing constant belongs to the model and
+the level of theory it was fitted at; when the "measured" data is itself a
+prediction from the same model -- a test, or a search against a known structure's
+computed spectrum -- both sides are shieldings and `convention shift` is the
+honest setting.
+
+```lammps
+group   gH type 1
+compute cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+fix     h1 gH mad/nmr c_cs target h1.dat range 5 40 141 sigma 1.5 &
+                            convention shift gamma 10.0
+```
+
+`tests/mad_shiftml.py` is the ShiftML backend: `ShiftML4` reproduces the
+`cs_iso` column of a reference structure to 8e-05 ppm, and the adjoint is one
+backward pass through its metatomic model. It is configured by environment
+(`MADLIB_SHIFTML_TYPES`, `_MODEL`, `_DEVICE`) because a LAMMPS compute passes no
+arguments to its module.
+
 ### `fix ID group mad/ir <stride> <compute> [keyword value ...]`
 
 An infrared spectrum from the total dipole of a running trajectory, by
@@ -262,6 +354,14 @@ compute mu all mad/property/dipole charges 0.5 -0.5
 fix     ir all mad/ir 2 c_mu nu_max 4000 acf_ratio 0.25 qc classical &
            smooth 5 gaussian file ir_spectrum.dat
 ```
+
+The dipole source is whatever `compute mad/property/*` the fix is pointed at,
+and the only one that produces a dipole today is `mad/property/dipole`, from
+partial charges. **TurboGAP drives its IR from a fitted dipole model instead**
+-- a different quantity, not an approximation to this one; see the property
+section above. The estimator agrees with TurboGAP's to machine precision, but
+that test hands the *same stored dipoles* to both codes, so what it verifies is
+the spectrum pipeline and not the dipole that feeds it.
 
 | keyword | default | meaning |
 |---|---|---|
@@ -356,6 +456,8 @@ tests/run.sh gradients mpi   # a subset
 | `ir` | the spectrum pipeline against TurboGAP's `ir_fft` over 29 configurations, a vibrational band against the force constant that produced it, the molecular dipole across ranks, and the periodic refusal |
 | `mliap` | an ML-IAP model's per-atom values against `pair_style mliap`'s own, and its adjoint by finite differences |
 | `torch` | a model written in Python against the C++ one it reimplements, and its autograd adjoint by finite differences |
+| `nmr` | ShiftML shieldings of a succinic acid crystal against the `cs_iso` column the frame arrived with -- an oracle owing nothing to this code -- the cell route against the 10 A ghost route, the NMR bias (energy, forces and virial) against an independent computation of the same chain, the shielding-or-shift guard, and that `reference` and `slope` commute. Skips without `shiftml` or its cached weights. |
+| `dipolemodel` | a `dipole_model = .true.` file refused by both `pair_style turbogap` and `compute mad/property/turbogap`, rather than read as a potential and answered |
 | `quip` | the bias running on a real GAP potential through `pair_style quip`, cross-checked against `quippy`, and a biased run closing the gap on it. Skips cleanly without ML-QUIP or the potentials. |
 
 The gradient legs report an **observed convergence order**, not a tolerance at

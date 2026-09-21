@@ -18,6 +18,7 @@
 #ifdef FIX_CLASS
 // clang-format off
 FixStyle(mad/xps,FixMADXps);
+FixStyle(mad/nmr,FixMADXps);
 FixStyle(mad/spectrum,FixMADXps);
 // clang-format on
 #else
@@ -49,7 +50,20 @@ class ComputeMADProperty;
 
    Contracting to lambda first also removes the (3, npairs, nsamples) array
    that dominates TurboGAP's memory for this observable: the work is O(N nk)
-   and the storage O(N). */
+   and the storage O(N).
+
+   mad/nmr is the same operation on chemical shifts, with one addition that
+   earns it a name of its own. A model predicts a SHIELDING and an experiment
+   reports a SHIFT, related by delta = a - b sigma; broadening shieldings and
+   fitting them against a shift target gives a MIRRORED spectrum, which the
+   scale/offset fit then happily rescales into something that looks like a fit
+   and is backwards. So mad/nmr insists the convention be stated: 'reference a
+   [slope b]' to convert, or 'convention shift' to say the property already is
+   one. Which nucleus a spectrum is of is the fix's GROUP, since a 1H and a
+   13C spectrum are two fixes over two groups of the same model.
+
+   The conversion is a pre-map q_i -> qscale q_i + qoffset applied wherever the
+   property is read, and its adjoint is one factor of qscale. */
 
 class FixMADXps : public FixMAD {
  public:
@@ -61,18 +75,20 @@ class FixMADXps : public FixMAD {
   void compute_spectrum() override;
   void accumulate_bias(const double *dEdy) override;
 
- private:
+ protected:
   enum { N_L2, N_AREA, N_NONE };
 
   char *propid;
   ComputeMADProperty *prop;
   double sigma, emin, emax, trunc;
+  double qscale, qoffset;
   int normalise, nmax_lam;
   double unorm;
   double *u, *ulocal;
   double **lambda;
 
   void grow_lambda();
+  double shifted(const double *q, int i) const { return qscale * q[i] + qoffset; }
 };
 
 }    // namespace LAMMPS_NS

@@ -1,0 +1,20 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The NMR bias on a scrambled succinic acid cell, with everything the
+# independent reference needs to check it: energy, forces and virial.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/succinic_shuffled.data
+pair_style      zero 3.0
+pair_coeff      * *
+group           gH type 1
+compute         cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+fix             mad gH mad/nmr c_cs target nmr_H.dat range 5.0 40.0 141 sigma 1.5 &
+                gamma 20.0 convention shift
+compute         vir all pressure NULL virial
+thermo_style    custom step f_mad c_vir[1] c_vir[2] c_vir[3] c_vir[4] c_vir[5] c_vir[6] vol
+thermo_modify   format float %.17g
+dump            d all custom 1 nmr_bias.dump id fx fy fz
+dump_modify     d format float %.17g sort id
+run 0

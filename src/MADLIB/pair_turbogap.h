@@ -49,6 +49,11 @@ namespace LAMMPS_NS {
    evaluated and a file that declares a term this cannot handle is an error
    rather than a silent omission.
 
+   A dipole model is refused outright. Its block is written like an energy
+   block and differs only by dipole_model = .true., so the arithmetic here runs
+   on it perfectly happily: water_dipole.gap on a water frame returns 2.69 eV,
+   which is a fitting artefact TurboGAP never adds to an energy.
+
    The arithmetic is TurboGAP's own, not a transcription of it: the 2b, 3b and
    core_pot routines in lib/madlib/turbogap/gap.f90 are compiled and called,
    and the SOAP term goes through the same GPR the local-property backend uses

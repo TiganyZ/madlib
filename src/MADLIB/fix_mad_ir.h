@@ -43,6 +43,13 @@ class ComputeMADProperty;
    see every stride-th step whether anything asks for its output or not, which
    is why fix ave/correlate is a fix too.
 
+   THE DIPOLE IS WHATEVER THE NAMED COMPUTE PRODUCES, and the only style that
+   produces one today is mad/property/dipole, from partial charges. TurboGAP
+   drives its IR from a fitted dipole model instead -- see the note in
+   compute_mad_property_dipole.h. The estimator below matches TurboGAP's
+   ir_fft to machine precision, but that test hands both codes the same stored
+   dipoles: it verifies the spectrum, not the dipole feeding it.
+
    Two things that surprise people, both written into the output header rather
    than left to be discovered:
 

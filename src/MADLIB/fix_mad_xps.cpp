@@ -27,16 +27,23 @@
 
 #include <cmath>
 #include <cstring>
+#include <string>
 
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
 FixMADXps::FixMADXps(LAMMPS *lmp, int narg, char **arg) :
-    FixMAD(lmp, narg, arg), propid(nullptr), prop(nullptr), nmax_lam(0), unorm(1.0), u(nullptr),
-    ulocal(nullptr), lambda(nullptr)
+    FixMAD(lmp, narg, arg), propid(nullptr), prop(nullptr), qscale(1.0), qoffset(0.0), nmax_lam(0),
+    unorm(1.0), u(nullptr), ulocal(nullptr), lambda(nullptr)
 {
-  if (narg < 5) utils::missing_cmd_args(FLERR, "fix mad/xps", error);
+  if (narg < 5) utils::missing_cmd_args(FLERR, style, error);
+
+  // mad/nmr is mad/xps with a stated shielding-or-shift convention; see the
+  // header. Nothing else about it differs.
+  const int is_nmr = (strcmp(style, "mad/nmr") == 0);
+  int said_convention = 0, have_ref = 0;
+  double slope = 1.0;
 
   const char *c = arg[3];
   if (strncmp(c, "c_", 2) == 0) c += 2;
@@ -55,7 +62,7 @@ FixMADXps::FixMADXps(LAMMPS *lmp, int narg, char **arg) :
       sigma = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
     } else if (strcmp(arg[iarg], "energy") == 0 || strcmp(arg[iarg], "range") == 0) {
-      if (iarg + 3 >= narg) utils::missing_cmd_args(FLERR, "fix mad/xps energy", error);
+      if (iarg + 3 >= narg) utils::missing_cmd_args(FLERR, std::string(style) + " energy", error);
       emin = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
       emax = utils::numeric(FLERR, arg[iarg + 2], false, lmp);
       nk_req = utils::inumeric(FLERR, arg[iarg + 3], false, lmp);
@@ -68,27 +75,55 @@ FixMADXps::FixMADXps(LAMMPS *lmp, int narg, char **arg) :
       else if (strcmp(arg[iarg + 1], "none") == 0)
         normalise = N_NONE;
       else
-        error->all(FLERR, "fix mad/xps norm must be l2, area or none");
+        error->all(FLERR, "fix {} norm must be l2, area or none", style);
       iarg += 2;
     } else if (strcmp(arg[iarg], "trunc") == 0) {
       trunc = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
+    } else if (is_nmr && strcmp(arg[iarg], "reference") == 0) {
+      qoffset = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      have_ref = said_convention = 1;
+      iarg += 2;
+    } else if (is_nmr && strcmp(arg[iarg], "slope") == 0) {
+      slope = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
+    } else if (is_nmr && strcmp(arg[iarg], "convention") == 0) {
+      if (strcmp(arg[iarg + 1], "shift") != 0)
+        error->all(FLERR,
+                   "fix mad/nmr convention takes only 'shift', meaning the property is already on "
+                   "the target's axis. To convert a shielding, give 'reference <a>'");
+      have_ref = 0;
+      said_convention = 1;
+      iarg += 2;
     } else {
-      error->all(FLERR, "Unknown fix mad/xps keyword {}", arg[iarg]);
+      error->all(FLERR, "Unknown fix {} keyword {}", style, arg[iarg]);
     }
   }
 
-  if (sigma <= 0.0) error->all(FLERR, "fix mad/xps sigma must be positive");
-  if (nk_req < 2) error->all(FLERR, "fix mad/xps requires energy <emin> <emax> <nsamples>");
-  if (emax <= emin) error->all(FLERR, "fix mad/xps emax must exceed emin");
+  // A model predicts a shielding and an experiment reports a shift. Broadening
+  // one against the other mirrors the spectrum, and the scale/offset fit then
+  // rescales the mirror image into a plausible-looking fit, so the convention
+  // is asked for rather than assumed.
+  if (is_nmr && !said_convention)
+    error->all(FLERR,
+               "fix mad/nmr needs the convention stated: 'reference <a> [slope <b>]' to convert a "
+               "shielding to a shift as delta = a - b sigma, or 'convention shift' if the "
+               "property already is one");
+  // Set after the loop, so 'slope' works whichever side of 'reference' it is on.
+  if (have_ref) qscale = -slope;
+  if (is_nmr && qscale == 0.0) error->all(FLERR, "fix mad/nmr slope must not be zero");
+
+  if (sigma <= 0.0) error->all(FLERR, "fix {} sigma must be positive", style);
+  if (nk_req < 2) error->all(FLERR, "fix {} requires range <min> <max> <nsamples>", style);
+  if (emax <= emin) error->all(FLERR, "fix {} needs max to exceed min", style);
 
   auto *cmp = modify->get_compute_by_id(propid);
-  if (!cmp) error->all(FLERR, "fix mad/xps could not find compute {}", propid);
+  if (!cmp) error->all(FLERR, "fix {} could not find compute {}", style, propid);
   prop = dynamic_cast<ComputeMADProperty *>(cmp);
-  if (!prop) error->all(FLERR, "fix mad/xps compute {} is not a mad/property style", propid);
+  if (!prop) error->all(FLERR, "fix {} compute {} is not a mad/property style", style, propid);
   if (prop->n_components() != 1)
-    error->all(FLERR, "fix mad/xps needs a scalar per-atom property, not one with {} components",
-               prop->n_components());
+    error->all(FLERR, "fix {} needs a scalar per-atom property, not one with {} components",
+               style, prop->n_components());
 
   std::vector<double> grid(nk_req);
   for (int k = 0; k < nk_req; k++) grid[k] = emin + (emax - emin) * k / (nk_req - 1);
@@ -111,7 +146,7 @@ FixMADXps::~FixMADXps()
 void FixMADXps::init()
 {
   prop = dynamic_cast<ComputeMADProperty *>(modify->get_compute_by_id(propid));
-  if (!prop) error->all(FLERR, "fix mad/xps lost its compute {}", propid);
+  if (!prop) error->all(FLERR, "fix {} lost its compute {}", style, propid);
 }
 
 void FixMADXps::grow_lambda()
@@ -141,12 +176,13 @@ void FixMADXps::compute_spectrum()
 
   for (int i = 0; i < nlocal; i++) {
     if (!(mask[i] & groupbit)) continue;
-    int lo = (int) ((q[i] - emin) / dx) - ntrunc;
-    int hi = (int) ((q[i] - emin) / dx) + ntrunc;
+    const double qi = shifted(q, i);
+    int lo = (int) ((qi - emin) / dx) - ntrunc;
+    int hi = (int) ((qi - emin) / dx) + ntrunc;
     if (lo < 0) lo = 0;
     if (hi >= nk) hi = nk - 1;
     for (int k = lo; k <= hi; k++) {
-      const double v = xgrid[k] - q[i];
+      const double v = xgrid[k] - qi;
       ulocal[k] += exp(-v * v * s2inv);
     }
   }
@@ -204,16 +240,18 @@ void FixMADXps::accumulate_bias(const double *dEdy)
   for (int i = 0; i < nlocal; i++) {
     lambda[i][0] = 0.0;
     if (!(mask[i] & groupbit)) continue;
-    int lo = (int) ((q[i] - emin) / dx) - ntrunc;
-    int hi = (int) ((q[i] - emin) / dx) + ntrunc;
+    const double qi = shifted(q, i);
+    int lo = (int) ((qi - emin) / dx) - ntrunc;
+    int hi = (int) ((qi - emin) / dx) + ntrunc;
     if (lo < 0) lo = 0;
     if (hi >= nk) hi = nk - 1;
     double acc = 0.0;
     for (int k = lo; k <= hi; k++) {
-      const double v = xgrid[k] - q[i];
+      const double v = xgrid[k] - qi;
       acc += dEdu[k] * v * sinv2 * exp(-v * v * s2inv);
     }
-    lambda[i][0] = acc;
+    // the chain through the convention: d(qi)/d(q_i) is qscale
+    lambda[i][0] = acc * qscale;
   }
 
   prop->adjoint(lambda, virial);

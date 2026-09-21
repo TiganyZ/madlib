@@ -1,0 +1,18 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# delta = a - b sigma, with the two keywords given in both orders. They must
+# mean the same thing; 'reference' setting the scale directly would let 'slope'
+# be silently dropped when it comes first.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/succinic_shuffled.data
+pair_style      zero 3.0
+pair_coeff      * *
+group           gH type 1
+compute         cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+fix             mad gH mad/nmr c_cs target nmr_H.dat range 5.0 40.0 141 sigma 1.5 &
+                gamma 20.0 slope 0.9 reference 45.0
+thermo_style    custom step f_mad f_mad[3]
+thermo_modify   format float %.17g
+run 0

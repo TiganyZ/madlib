@@ -143,11 +143,24 @@ compare_kk() {
   fi
 }
 
+# A dipole model must stop both entry points with a named reason rather than
+# answering: its block is written exactly like an energy block, so a reader
+# that ignores the flag returns a perfectly ordinary number. $1 what is being
+# tried, $2 the input deck.
+check_refusal() {
+  local what=$1 deck=$2
+  if $LMP -in "$deck" -var dgap "$DGAP" -log none 2>&1 | grep -q "is a dipole model"; then
+    ok "$what refuses it"
+  else
+    bad "$what accepted a dipole model"
+  fi
+}
+
 leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir quip torch mliap}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir dipolemodel quip torch mliap nmr}
 
 for w in $want; do
 case $w in
@@ -455,6 +468,93 @@ PY
     if $LMP -in in.ir_guard -log none 2>&1 | grep -q "not defined in a periodic box"; then
       ok "a periodic box without molecules is an error, not a plausible spectrum"
     else bad "a periodic sum q_i r_i was accepted"; fi
+  fi
+  ;;
+
+nmr)
+  leg "NMR shieldings from ShiftML, and the bias built on them"
+  # The models are ~80 MB from Zenodo, so this leg uses what is cached rather
+  # than downloading during a test run.
+  SHIFTML_MODEL=${MADLIB_SHIFTML_MODEL:-ShiftML41}
+  if ! $PYTHON -c 'import shiftml' >/dev/null 2>&1; then
+    echo "    SKIP: shiftml is not installed (pip install shiftml)"
+  elif [ ! -s "$HOME/.cache/shiftml/$SHIFTML_MODEL/$SHIFTML_MODEL.pt" ]; then
+    echo "    SKIP: $SHIFTML_MODEL is not in ~/.cache/shiftml"
+  else
+    # not a subshell: bad() has to be able to set fail
+    export MADLIB_SHIFTML_TYPES='H C O'
+    export MADLIB_SHIFTML_MODEL=$SHIFTML_MODEL
+    export MADLIB_SHIFTML_DEVICE=${MADLIB_SHIFTML_DEVICE:-cpu}
+    # lmp links the system OpenBLAS, which interposes on the MKL inside
+    # libtorch_cpu and segfaults the first batched gemm. See NOTES.md #26.
+    export LD_PRELOAD=$($PYTHON -c 'import os,torch;print(os.path.dirname(torch.__file__))')/lib/libtorch_cpu.so
+
+    echo "  -- one periodic cell against a 10 A ghost cloud"
+    $LMP -in in.nmr_predict     -log none >/dev/null 2>&1
+    $LMP -in in.nmr_predict_pbc -log none >/dev/null 2>&1
+    if $PYTHON nmr_compare.py nmr_cs.dump nmr_cs_pbc.dump 1e-3; then
+      ok "the two ways of saying where the atoms are agree"
+    else bad "pbc yes and the ghost route disagree"; fi
+
+    echo "  -- the bias against an independent computation of the same chain"
+    $LMP -in in.nmr -log none 2>&1 | grep -A2 '^   Step' | sed -n 2p > /tmp/mad_nmr_thermo.txt
+    read -r _ E v1 v2 v3 v4 v5 v6 VOL < /tmp/mad_nmr_thermo.txt
+    # compute pressure reports the virial in bar; the reference works in eV
+    vir=$($PYTHON -c "
+import sys
+vol = float(sys.argv[7])
+print(' '.join('%.12g' % (float(p) * vol / 1.6021765e6) for p in sys.argv[1:7]))" \
+        $v1 $v2 $v3 $v4 $v5 $v6 $VOL)
+    if $PYTHON nmr_reference.py data/succinic_shuffled.data nmr_H.dat 1 5.0 40.0 141 1.5 20.0 \
+         nmr_bias.dump $E $vir 2>/dev/null; then
+      ok "energy, forces and virial match the reference"
+    else bad "the NMR bias disagrees with an independent computation of it"; fi
+
+    echo "  -- the span, against shiftml's own tensor API"
+    $LMP -in in.nmr_span_predict -log none >/dev/null 2>&1
+    if $PYTHON nmr_span_reference.py nmr_span.dump data/succinic.data 1e-2; then
+      ok "the Cartesian tensor is reconstructed correctly"
+    else bad "mad_shiftml_span disagrees with shiftml's get_cs_tensor"; fi
+
+    echo "  -- a shielding is not a shift"
+    if $LMP -in in.nmr_guard -log none 2>&1 | grep -q "convention stated"; then
+      ok "a missing convention is an error, not a mirrored spectrum"
+    else bad "fix mad/nmr ran without being told shielding or shift"; fi
+
+    echo "  -- reference and slope mean the same in either order"
+    for n in 1 2; do
+      $LMP -in in.nmr_ref$n -log none 2>&1 | grep -A2 '^   Step' | sed -n 2p \
+          > /tmp/mad_nmr_ref$n.txt
+    done
+    a=$(awk '{print $2}' /tmp/mad_nmr_ref1.txt)
+    b=$(awk '{print $2}' /tmp/mad_nmr_ref2.txt)
+    echo "    E = $a and $b"
+    if [ "$a" = "$b" ]; then ok "the conversion does not depend on keyword order"
+    else bad "'slope' before 'reference' is dropped"; fi
+
+    # The frame arrived with ShiftML4's own prediction attached, which is the
+    # one oracle here that owes nothing to this code. It needs the whole
+    # seven-member ensemble, so it runs when that is cached. Last, because it
+    # overwrites the dump the earlier checks compared.
+    if [ -s "$HOME/.cache/shiftml/ShiftML47/ShiftML47.pt" ]; then
+      echo "  -- against the cs_iso column the frame arrived with"
+      MADLIB_SHIFTML_MODEL=ShiftML4 $LMP -in in.nmr_predict_pbc -log none >/dev/null 2>&1
+      if $PYTHON nmr_vs_reference_column.py nmr_cs_pbc.dump data/succinic_cs_ref.dat 1e-3; then
+        ok "the ensemble reproduces a prediction made outside this code"
+      else bad "the shieldings disagree with the column in the source xyz"; fi
+    fi
+    unset LD_PRELOAD
+  fi
+  ;;
+
+dipolemodel)
+  leg "a dipole model is refused rather than read as a potential"
+  DGAP=$DATA_ROOT/water_dipole/gap_files/water_dipole.gap
+  if [ ! -e "$DGAP" ]; then
+    echo "    SKIP: no dipole model (set MADLIB_DATA_ROOT)"
+  else
+    check_refusal "pair_style turbogap" in.dipole_pair
+    check_refusal "compute mad/property/turbogap" in.dipole_property
   fi
   ;;
 

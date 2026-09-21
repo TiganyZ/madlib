@@ -1,0 +1,13 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The shielding span of the same frame, through the sibling backend module.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/succinic.data
+pair_style      zero 3.0
+pair_coeff      * *
+compute         sp all mad/property/python mad_shiftml_span ncomp 1 pbc yes
+dump            d all custom 1 nmr_span.dump id type c_sp
+dump_modify     d format float %.8f sort id
+run 0

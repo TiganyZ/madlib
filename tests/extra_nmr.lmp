@@ -1,0 +1,5 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+group   gH type 1
+compute cs all mad/property/python mad_shiftml ncomp 1 pbc yes
+fix     mad gH mad/nmr c_cs target nmr_H.dat range 5.0 40.0 141 sigma 1.5 &
+        gamma 20.0 convention shift

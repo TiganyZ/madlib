@@ -1,0 +1,22 @@
+Author: Tigany Zarrouk (tiganyzarrouk@gmail.com) -- frame 1 of water_dipole_tnep_converted_test.xyz
+
+6 atoms
+2 atom types
+
+0.0 20.0 xlo xhi
+0.0 20.0 ylo yhi
+0.0 20.0 zlo zhi
+
+Masses
+
+1 15.999
+2 1.008
+
+Atoms # atomic
+
+1 1 0.00000000 0.00000000 0.00000000
+2 2 1.09538100 0.00000000 0.00000000
+3 2 -0.51204600 0.91215600 0.00000000
+4 1 0.11538200 -0.05017400 -2.53332200
+5 2 -0.25533400 -0.28875200 -1.57447800
+6 2 1.08722900 -0.34658700 -2.73858100
