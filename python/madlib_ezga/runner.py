@@ -25,12 +25,19 @@ from .lammps_run import LammpsError, find_lmp, run
 FAILED_ENERGY = 1.0e6
 
 
-def _moves(gamma, nsteps, temp, seed, relax_steps):
+def _moves(gamma, nsteps, temp, seed, relax_steps, box):
+    # With a box relax, two passes: cg to settle the cell -- LAMMPS refuses a
+    # damped dynamics style with fix box/relax -- then fire at fixed cell to
+    # polish, because cg alone converges to a visibly worse point on the
+    # combined landscape (at gamma 30, rel_error 0.443 against fire's 0.383).
+    if box:
+        relax = (deck_mod.minimise(maxiter=max(1, relax_steps // 2), box=box)
+                 + deck_mod.minimise(maxiter=relax_steps))
+    else:
+        relax = deck_mod.minimise(maxiter=relax_steps)
     if nsteps:
-        return deck_mod.anneal(nsteps, temp, temp * 0.1, seed) + deck_mod.minimise(
-            maxiter=relax_steps
-        )
-    return deck_mod.minimise(maxiter=relax_steps)
+        return deck_mod.anneal(nsteps, temp, temp * 0.1, seed) + relax
+    return relax
 
 
 def madlib_runner(
@@ -40,6 +47,7 @@ def madlib_runner(
     nsteps=0,
     relax_steps=200,
     temperature=1000.0,
+    box_relax=None,
     pdf=None,
     xrd=None,
     lmp=None,
@@ -77,7 +85,8 @@ def madlib_runner(
             pdf=pdf,
             xrd=xrd,
             gamma=gamma,
-            moves=_moves(gamma, nsteps, temperature, int(seed) + index, relax_steps),
+            moves=_moves(gamma, nsteps, temperature, int(seed) + index, relax_steps,
+                         box_relax),
             masses={i + 1: mass for i in range(len(set(symbols)))},
         )
 

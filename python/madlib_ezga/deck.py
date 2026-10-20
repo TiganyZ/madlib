@@ -114,8 +114,26 @@ def score():
     return ["run 0"]
 
 
-def minimise(etol=1e-6, ftol=1e-4, maxiter=2000):
-    return [f"min_style fire", f"minimize {etol:g} {ftol:g} {maxiter} {maxiter * 10}"]
+def minimise(etol=1e-6, ftol=1e-4, maxiter=2000, box=None, vmax=0.001):
+    """Relax positions, and the cell too when `box` is iso/aniso/tri.
+
+    Relaxing the cell needs the virial, which for pair_style turbogap was
+    wrong until the 2b and core_pot terms stopped going through f.r. With it
+    right, each individual settles at the density its own gamma wants -- and
+    the measured pattern does not want the density the potential does
+    (1.41 against 1.50 g/cm3 for glassy carbon), so that is a real axis of
+    the front rather than a detail.
+    """
+    # fire is the better minimiser here, but LAMMPS refuses a damped dynamics
+    # style with fix box/relax ("Cannot use a damped dynamics min style with
+    # fix box/relax"), so relaxing the cell means cg.
+    lines = ["min_style cg" if box else "min_style fire"]
+    if box:
+        lines.append(f"fix br all box/relax {box} 0.0 vmax {vmax:g}")
+    lines.append(f"minimize {etol:g} {ftol:g} {maxiter} {maxiter * 10}")
+    if box:
+        lines.append("unfix br")
+    return lines
 
 
 def md(steps, temp, seed, damp=0.1):
