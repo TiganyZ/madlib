@@ -175,6 +175,10 @@ def render(
     if dump_file:
         lines += [
             "",
-            f"write_dump all custom {dump_file} id type xs ys zs modify sort id",
+            # %.16g, not the default %g: an individual makes this round trip
+            # once per generation, and truncation there is noise the GA would
+            # accumulate.
+            f"write_dump all custom {dump_file} id type xs ys zs"
+            f" modify sort id format float %.16g",
         ]
     return "\n".join(lines) + "\n"

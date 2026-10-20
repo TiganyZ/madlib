@@ -3,7 +3,7 @@
 import sys
 import numpy as np
 
-from madlib_ezga import deck, front, objectives
+from madlib_ezga import deck, features, front, objectives
 from madlib_ezga.lammps_run import parse_thermo
 
 FAILURES = []
@@ -102,8 +102,29 @@ def test_front():
     check("duplicates do not erase each other", len(keep) >= 2, keep)
 
 
+def test_coordination():
+    """Against structures whose answer is known by construction."""
+    from ase.build import bulk
+    from ase.lattice.hexagonal import Graphite
+
+    diamond = bulk("C", "diamond", a=3.567, cubic=True).repeat((2, 2, 2))
+    graphite = Graphite(symbol="C", latticeconstant={"a": 2.461, "c": 6.708}).repeat((3, 3, 2))
+
+    cn_d = features._coordination(diamond.get_positions(), np.array(diamond.get_cell()), 1.85)
+    cn_g = features._coordination(graphite.get_positions(), np.array(graphite.get_cell()), 1.85)
+    check("diamond is 4-coordinate", abs(cn_d - 4.0) < 1e-9, cn_d)
+    check("graphite is 3-coordinate", abs(cn_g - 3.0) < 1e-9, cn_g)
+
+    # minimum image: a bond across the boundary must still be counted
+    import ase
+    pair = ase.Atoms("C2", positions=[[0.1, 0, 0], [9.9, 0, 0]],
+                     cell=np.eye(3) * 10.0, pbc=True)
+    cn_p = features._coordination(pair.get_positions(), np.array(pair.get_cell()), 1.85)
+    check("bond across the boundary counts", abs(cn_p - 1.0) < 1e-9, cn_p)
+
+
 for test in [test_pdf_cutoffs, test_deck_text, test_parse_thermo,
-             test_objectives, test_front]:
+             test_objectives, test_front, test_coordination]:
     print(test.__name__)
     test()
 

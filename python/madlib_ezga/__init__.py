@@ -9,6 +9,7 @@ an ordinary import.
 """
 
 from .deck import Pdf, Potential, Xrd, render
+from .features import feature_mean_coordination, feature_sp_fractions
 from .front import non_dominated, write_front
 from .objectives import objective_energy_per_atom, objective_xrd_rel_error
 from .runner import madlib_runner
@@ -18,6 +19,8 @@ __all__ = [
     "Potential",
     "Xrd",
     "render",
+    "feature_mean_coordination",
+    "feature_sp_fractions",
     "madlib_runner",
     "objective_xrd_rel_error",
     "objective_energy_per_atom",
