@@ -68,4 +68,14 @@ the SAGE database: EZGA keeps every structure but writes no front of its own.
 | `runner.py` | the EZGA calculator |
 | `objectives.py` | the EZGA objectives |
 | `front.py` | non-dominated sort over a finished run |
-| `tests/` | everything that needs no LAMMPS: `python3 tests/test_madlib_ezga.py` |
+| `tests/test_madlib_ezga.py` | everything that needs no LAMMPS: deck text, log parsing, objectives, front, coordination |
+| `tests/test_roundtrip.py` | against a real LAMMPS: round trip through the dump, triclinic cells, and that the reported energy is the potential alone |
+
+```sh
+python3 tests/test_madlib_ezga.py
+
+MADLIB_LMP=/path/to/lmp \
+MADLIB_GAP_DIR=/path/to/gap_files \
+MADLIB_XRD_TARGET=/path/to/target.fq \
+  python3 tests/test_roundtrip.py /path/to/structure.data
+```
