@@ -10,6 +10,10 @@ from pathlib import Path
 
 import numpy as np
 
+from .features import _coordination
+
+AMU_PER_CM3_TO_G = 1.66053906660
+
 
 def non_dominated(objectives):
     """Indices of the non-dominated rows of an (N, K) array. Lower is better."""
@@ -68,21 +72,36 @@ def write_front(db_path, out_dir, misfit_key="xrd_rel_error"):
     order = np.argsort(misfits[front])
     front = front[order]
 
-    with open(out_dir / "pareto.csv", "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["db_id", "generation", "energy_per_atom_eV", misfit_key])
-        for i in front:
-            generation = generations[i] if generations is not None else ""
-            writer.writerow([ids[i], generation, f"{energy_per_atom[i]:.10g}",
-                             f"{misfits[i]:.10g}"])
-
+    # Coordination and density come from the structures themselves, in the
+    # same pass that exports them: a front without them says which structures
+    # trade off, not whether any of them is physically sensible -- which is
+    # the question that separates a fit from a model.
     db = Partition(storage="hybrid", local_root=str(db_path), access="ro")
+    rows = []
     try:
         path = str(out_dir / "pareto.xyz")
         for rank, i in enumerate(front):
             manager = db.get_container(int(ids[i])).AtomPositionManager
+            positions = np.asarray(manager.atomPositions, dtype=float)
+            cell = np.asarray(manager.latticeVectors, dtype=float)
+            try:
+                coordination = _coordination(positions, cell, 1.85)
+                density = (len(positions) * 12.011 * AMU_PER_CM3_TO_G
+                           / abs(np.linalg.det(cell)))
+            except (ValueError, np.linalg.LinAlgError):
+                coordination, density = float("nan"), float("nan")
+            rows.append((ids[i], generations[i] if generations is not None else "",
+                         energy_per_atom[i], misfits[i], coordination, density))
             manager.export_as_xyz(file_location=path, save_to_file="w" if rank == 0 else "a")
     finally:
         db.close()
+
+    with open(out_dir / "pareto.csv", "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["db_id", "generation", "energy_per_atom_eV", misfit_key,
+                         "coordination", "density"])
+        for db_id, generation, energy, misfit, coordination, density in rows:
+            writer.writerow([db_id, generation, f"{energy:.10g}", f"{misfit:.10g}",
+                             f"{coordination:.6g}", f"{density:.6g}"])
 
     return np.column_stack([energy_per_atom[front], misfits[front]])

@@ -73,7 +73,12 @@ def _header(data_file, masses, pdf):
         "atom_style      atomic",
         "boundary        p p p",
         "atom_modify     map yes",
-        f"read_data       {data_file}",
+        # nocoeff: a structure written by another stage carries that stage's
+        # Pair Coeffs -- the RMC runs store an lj/cut core -- and read_data
+        # refuses a coefficient section before its pair_style is declared.
+        # Every deck here names pair_coeff explicitly, so stored ones are
+        # never wanted.
+        f"read_data       {data_file} nocoeff",
     ]
     lines += [f"mass            {t} {m}" for t, m in sorted(masses.items())]
     lines += [
