@@ -62,14 +62,28 @@ namespace LAMMPS_NS {
 
    Forces divide into two kinds and they are NOT handled the same way.
 
-   The 2b, 3b and core_pot routines write the force only onto the CENTRAL site
-   of each pair, the reciprocal being picked up when the neighbour is itself a
+   The 2b and core_pot routines write the force only onto the CENTRAL site of
+   each pair, the reciprocal being picked up when the neighbour is itself a
    central site. Over a full neighbour list of local atoms that is already
    complete per rank, and needs no communication.
 
-   The SOAP term is many-body: dE_i/dr_j lands on the NEIGHBOUR, which may be a
-   ghost, so those contributions are written to ghost indices and LAMMPS's own
-   reverse communication returns them. */
+   The SOAP and 3b terms are many-body: dE_i/dr_j lands on the NEIGHBOUR,
+   which may be a ghost, so those contributions are written to ghost indices
+   and LAMMPS's own reverse communication returns them.
+
+   THE VIRIAL FOLLOWS THAT SPLIT, AND MUST.
+
+   r.f over local and ghost atoms is only the virial when each force sits at
+   the position it was computed for. That holds for SOAP and 3b. It does not
+   hold for 2b and core_pot: the reciprocal of a pair crossing a periodic
+   boundary is deposited on the LOCAL neighbour at its wrapped position
+   instead of on the ghost at its image, so the sum loses one lattice vector
+   per boundary-crossing pair. Taking the whole virial from r.f put diamond at
+   its equilibrium lattice constant at -85.7 GPa against +2.8 from -dE/dV.
+
+   So the pair terms bring their own virial -- TurboGAP accumulates it inside
+   the loop, where the true separation is in hand -- and SOAP accumulates x.f
+   as it writes, which needs no reciprocal and is immune to the problem. */
 
 class PairTurboGAP : public Pair {
  public:
@@ -148,6 +162,11 @@ class PairTurboGAP : public Pair {
   void pack_species_table();
   void add_soap_terms(int eflag);
   void add_pair_terms(int eflag);
+
+  // Add the 3x3 the TurboGAP terms left in virial_term to LAMMPS's virial.
+  // Called once after all of them: the Fortran shim accumulates into that
+  // buffer rather than each routine owning its own.
+  void tally_term_virial();
 
   // Split so the Kokkos variant can replace one and inherit the other.
   // TurboGAP has device kernels for 2b and core_pot that take raw device

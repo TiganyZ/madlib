@@ -160,7 +160,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir dipolemodel quip torch mliap nmr}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir dipolemodel quip torch mliap nmr}
 
 for w in $want; do
 case $w in
@@ -555,6 +555,24 @@ dipolemodel)
   else
     check_refusal "pair_style turbogap" in.dipole_pair
     check_refusal "compute mad/property/turbogap" in.dipole_property
+  fi
+  ;;
+
+pairvirial)
+  leg "the pair virial against finite differences of its own energy"
+  if [ ! -e data/gap_files/CO.gap ]; then
+    echo "    SKIP: no GAP potential (set MADLIB_DATA_ROOT)"
+  else
+    # Against something OUTSIDE the style. The newton leg below compares the
+    # two newton modes to each other, which a wrong virial passes by agreeing
+    # with itself -- it did, at -85.7 GPa on diamond where -dE/dV is +2.8.
+    $PYTHON pair_virial_fd.py data/gc91.data --lmp "$LMP" \
+        --gap data/gap_files/CO.gap --species C O --mass 12.011 15.999 \
+        --e0 C -.16138053 O 0.0
+    rc=$?
+    if [ $rc -eq 0 ]; then ok "the pair virial is -dE/depsilon"
+    elif [ $rc -eq 2 ]; then :   # the script said SKIP and why
+    else bad "the pair virial disagrees with finite differences"; fi
   fi
   ;;
 

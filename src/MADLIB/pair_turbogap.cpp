@@ -84,7 +84,7 @@ PairTurboGAP::PairTurboGAP(LAMMPS *lmp) : Pair(lmp)
   one_coeff = 1;           // pair_coeff * * only
   manybody_flag = 1;       // SOAP and 3b are not pairwise
   centroidstressflag = CENTROID_NOTAVAIL;
-  // This style computes its own global virial from r.f. Saying so keeps
+  // This style tallies its own global virial, per term. Saying so keeps
   // vflag_global set under newton on as well as newton off, which is the only
   // flag the compute below can test; LAMMPS otherwise routes the two modes
   // through vflag_fdotr and vflag_global separately.
@@ -421,11 +421,31 @@ void PairTurboGAP::add_soap_terms(int eflag)
     }
     if (report_terms && comm->me == 0)
       fprintf(stderr, "  soap block central=%d ns=%d E=%.17g\n", b.central_species, ns, esum);
+    // x.f accumulated here rather than through virial_fdotr_compute over the
+    // whole array: that would also sweep up whatever a hybrid sub-style had
+    // already left in f, and the pair terms below deliberately do not go
+    // through f.r at all. Component order follows Pair::virial_fdotr_compute
+    // exactly -- virial[3] is f_y x_x, not f_x x_y.
+    //
+    // Valid because sum_j dE_i/dr_j = 0 over the neighbours of each site, so
+    // the sum does not depend on where the origin is.
+    double **x = atom->x;
     for (int p = 0; p < np; p++) {
       const int a = sub_jatom[p];
-      f[a][0] -= v_der[3 * p];
-      f[a][1] -= v_der[3 * p + 1];
-      f[a][2] -= v_der[3 * p + 2];
+      const double fx = -v_der[3 * p];
+      const double fy = -v_der[3 * p + 1];
+      const double fz = -v_der[3 * p + 2];
+      f[a][0] += fx;
+      f[a][1] += fy;
+      f[a][2] += fz;
+      if (vflag_global) {
+        virial[0] += fx * x[a][0];
+        virial[1] += fy * x[a][1];
+        virial[2] += fz * x[a][2];
+        virial[3] += fy * x[a][0];
+        virial[4] += fz * x[a][0];
+        virial[5] += fz * x[a][1];
+      }
     }
   }
   (void) eflag;
@@ -491,6 +511,48 @@ void PairTurboGAP::add_2b_and_core(int ns, int np, int nall)
 #endif
 }
 
+/* ----------------------------------------------------------------------
+   TurboGAP's own virial for one term, in LAMMPS's convention.
+
+   Called once, after every term: madlib_gap.f90's accumulate() sums them
+   into one buffer rather than each routine owning its own.
+
+   Reading it off gap.f90 rather than guessing. For 2b and core_pot,
+   this_force is the force on the CENTRAL site and xyz(:,k) is
+   r_neighbour - r_centre, and the routine accumulates
+
+       virial -= 0.5 (this_force (x) xyz + xyz (x) this_force)
+
+   over every ORDERED pair, then halves the result. With xyz = -r_ij that is
+   +sym(f_ij (x) r_ij) per ordered pair, and the halving undoes visiting each
+   pair from both ends -- which is also what makes it right across ranks,
+   where the two ends sit on different ones. So it arrives as
+
+       sum over unordered pairs of r_ij (x) f_ij
+
+   which is LAMMPS's virial, same sign, no leftover factor.
+
+   3b accumulates the same quantity with the opposite sign and no halving,
+   because there this_force is the force on the NEIGHBOUR, not the centre.
+
+   The 3x3 is symmetric by construction, so the column-major read needs no
+   care about which triangle it comes from.
+------------------------------------------------------------------------- */
+
+void PairTurboGAP::tally_term_virial()
+{
+  if (!vflag_global) return;
+  const double *v = virial_term.data();
+  virial[0] += v[0];    // xx
+  virial[1] += v[4];    // yy
+  virial[2] += v[8];    // zz
+  virial[3] += v[3];    // xy
+  virial[4] += v[6];    // xz
+  virial[5] += v[7];    // yz
+}
+
+/* ---------------------------------------------------------------------- */
+
 void PairTurboGAP::report_term(int ns, const char *what, int nblocks)
 {
   if (!report_terms || comm->me != 0) return;
@@ -541,6 +603,11 @@ void PairTurboGAP::add_pair_terms(int eflag)
 
   add_2b_and_core(ns, np, nall);
   add_3b(ns, np, nall);
+  // Once, not per term: madlib_gap.f90's accumulate() already sums each
+  // term's 3x3 into the shared buffer, so tallying inside the term loops
+  // counts the earlier terms again -- which read as +177 GPa on diamond where
+  // the truth is +2.
+  tally_term_virial();
 
   for (int s = 0; s < ns; s++) {
     // e0 is a per-atom offset, not a term: TurboGAP folds it into the soap
@@ -603,21 +670,18 @@ void PairTurboGAP::compute(int eflag, int vflag)
               ms(t0, t1), ms(t1, t2), ms(t2, t3));
   }
 
-  // The virial comes from f.r rather than from TurboGAP's own accumulator.
-  // Its routines return a 3x3 built with a sign and a factor of their own, and
-  // deriving the LAMMPS convention from it by inspection is exactly the kind
-  // of thing that is wrong by a factor of two without looking wrong. f.r needs
-  // only the forces, which are checked directly.
-  // Before the fold, not after: virial_fdotr_compute sums r.f over local AND
-  // ghost atoms, so it wants the ghost forces still sitting where they were
-  // computed.
+  // No virial_fdotr_compute here. Each term has already tallied its own:
+  // SOAP accumulated x.f as it wrote (its forces sit on the ghosts they were
+  // computed for), and the pair terms handed back TurboGAP's accumulator.
   //
-  // On vflag_global rather than vflag_fdotr. With newton off -- which the
-  // KOKKOS package selects by default -- LAMMPS sets virial_style to
-  // VIRIAL_PAIR and clears vflag_fdotr, expecting a per-pair tally that this
-  // style does not have. r.f is right in both newton modes, and without this
-  // the pressure is silently zero rather than wrong.
-  if (vflag_global) virial_fdotr_compute();
+  // r.f over the whole array was what made the pressure wrong. 2b and
+  // core_pot deposit the reciprocal of a boundary-crossing pair on the local
+  // neighbour at its wrapped position rather than on the ghost, so the sum
+  // was short by a lattice vector for every such pair -- diamond at its
+  // equilibrium lattice constant read -85.7 GPa against +2.8 from -dE/dV.
+  //
+  // no_virial_fdotr_compute = 1 in the constructor is what keeps vflag_global
+  // set in both newton modes; see the comment there.
 
   // With newton pair on, LAMMPS folds the ghosts itself after compute and
   // doing it here too would count them twice.
