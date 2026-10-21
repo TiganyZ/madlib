@@ -44,6 +44,22 @@ namespace LAMMPS_NS {
    fraction of the buffer kept as lags, and d_nu = CM_PER_INV_FS/(N2 dt). A
    long run with a short lag window gives a coarse spectrum.
 
+   WHAT IS CORRELATED IS ALSO A CHOICE. "dipole" correlates mu; "rate" its
+   backward difference (mu - mu_prev)/dt, which with quantum_correction "none"
+   gives the same spectrum to O((w dt)^2) because FT[<Mdot Mdot>] = w^2
+   FT[<M M>]. Numerically they are not the same: nu^2 times the transform of
+   <MM> multiplies a long-lag tail by 72 between 400 and 3400 cm^-1, where
+   the rate form puts the weight on short lags, which are the well determined
+   ones. Most modern water-IR-from-MD work uses the derivative form.
+
+   The real difference is what a bias built on it would do, and it is why
+   TurboGAP added the option: the gradient is taken with respect to the newest
+   value with the past frozen, so under "dipole" the push is in phase with
+   each mode's DISPLACEMENT and retunes bands, while under "rate" it is in
+   phase with each mode's VELOCITY and pumps a band the experiment says is too
+   weak while draining one it says is too strong. Nothing here applies a
+   force, but the estimator has to agree with the one a bias would use.
+
    THE WEIGHTING IS A PHYSICAL CHOICE. "harmonic" is nu(1-exp(-hbar c nu/kT)),
    "classical" is nu^2. They agree only for hbar w << kT -- below about 208
    cm^-1 at 300 K -- and at 3400 cm^-1 the harmonic form is 16 times smaller
@@ -60,6 +76,7 @@ struct MADIrConfig {
   int smooth_k = 10;    // in BINS, not cm^-1
   std::string smooth_kind = "gaussian";
   std::string window = "hann";
+  std::string correlate = "dipole";    // or "rate": correlate mu-dot
   std::string quantum_correction = "harmonic";
   bool subtract_mean = true;
   bool normalise = true;

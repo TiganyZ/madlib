@@ -23,9 +23,11 @@
 #include "compute_mad_property.h"
 #include "error.h"
 #include "force.h"
+#include "mad_target.h"
 #include "modify.h"
 #include "update.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -36,7 +38,8 @@ using namespace FixConst;
 
 FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg), propid(nullptr), prop(nullptr), nframes(0), outevery(0), wrote_header(0),
-    have_spectrum(0), dt_fs_user(-1.0), outfile(nullptr), last_transform(-1)
+    have_spectrum(0), dt_fs_user(-1.0), outfile(nullptr), last_transform(-1), target(nullptr),
+    fit_nu_min(0.0), fit_nu_max(1.0e30), rel_err(0.0), dissim(0.0), n_fit(0)
 {
   if (narg < 5) utils::missing_cmd_args(FLERR, "fix mad/ir", error);
 
@@ -46,6 +49,10 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
   const char *c = arg[4];
   if (strncmp(c, "c_", 2) == 0) c += 2;
   propid = utils::strdup(c);
+
+  std::string targetfile;
+  bool fit_s = true, fit_b = false;
+  int saw_fit = 0;
 
   int iarg = 5;
   while (iarg < narg) {
@@ -57,6 +64,9 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
       iarg += 2;
     } else if (strcmp(arg[iarg], "window") == 0) {
       cfg.window = arg[iarg + 1];
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "correlate") == 0) {
+      cfg.correlate = arg[iarg + 1];
       iarg += 2;
     } else if (strcmp(arg[iarg], "qc") == 0) {
       cfg.quantum_correction = arg[iarg + 1];
@@ -90,9 +100,36 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "write_every") == 0) {
       outevery = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "target") == 0) {
+      if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir target", error);
+      targetfile = arg[iarg + 1];
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "fit") == 0) {
+      if (iarg + 2 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir fit", error);
+      fit_s = (strcmp(arg[iarg + 1], "yes") == 0);
+      fit_b = (strcmp(arg[iarg + 2], "yes") == 0);
+      saw_fit = 1;
+      iarg += 3;
+    } else if (strcmp(arg[iarg], "fit_range") == 0) {
+      if (iarg + 2 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir fit_range", error);
+      fit_nu_min = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      fit_nu_max = utils::numeric(FLERR, arg[iarg + 2], false, lmp);
+      saw_fit = 1;
+      iarg += 3;
     } else {
       error->all(FLERR, "Unknown fix mad/ir keyword {}", arg[iarg]);
     }
+  }
+
+  if (!targetfile.empty()) {
+    target = new MADTarget(error);
+    target->read(targetfile);
+    // Unlike the biasing fixes, which default to no fit at all: a predicted IR
+    // intensity is in arbitrary units and is normalised to a peak of one by
+    // default, so without a fitted scale the misfit would measure the units.
+    target->set_fit(fit_s, fit_b);
+  } else if (saw_fit) {
+    error->all(FLERR, "fix mad/ir fit and fit_range need a target to compare against");
   }
 
   auto *cmp = modify->get_compute_by_id(propid);
@@ -115,7 +152,7 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
   datamask_modify = F_MASK;
   extscalar = 0;
   vector_flag = 1;
-  size_vector = 5;
+  size_vector = 9;
   extvector = 0;
   array_flag = 1;
   size_array_rows = 0;
@@ -131,6 +168,7 @@ FixMADIr::~FixMADIr()
 {
   delete[] propid;
   delete[] outfile;
+  delete target;
 }
 
 int FixMADIr::setmask()
@@ -233,7 +271,38 @@ bool FixMADIr::transform_now()
   have_spectrum = 1;
   last_transform = update->ntimestep;
   size_array_rows = res.n_freq;
+  score();
   return true;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixMADIr::score()
+{
+  rel_err = dissim = 0.0;
+  n_fit = 0;
+  if (!target) return;
+
+  // MADTarget refuses to extrapolate, and rightly: the prediction grid starts
+  // at nu = 0 and ends at nu_max, while a measured curve covers neither end.
+  // Rebuilt every transform because n_freq grows as the buffer fills.
+  const double lo = std::max(fit_nu_min, target->range_min());
+  const double hi = std::min(fit_nu_max, target->range_max());
+
+  fit_nu.clear();
+  fit_y.clear();
+  for (int k = 0; k < res.n_freq; k++) {
+    if (res.freq[k] < lo || res.freq[k] > hi) continue;
+    fit_nu.push_back(res.freq[k]);
+    fit_y.push_back(res.intensity[k]);
+  }
+  if ((int) fit_nu.size() < 2) return;
+
+  target->set_grid(fit_nu, true);
+  target->loss(fit_y.data(), 0.0, nullptr);
+  rel_err = target->rel_error();
+  dissim = target->dissimilarity();
+  n_fit = (int) fit_nu.size();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -257,6 +326,14 @@ double FixMADIr::compute_vector(int n)
       return res.nyquist;
     case 4:
       return res.peak;
+    case 5:
+      return rel_err;
+    case 6:
+      return target ? target->scale() : 0.0;
+    case 7:
+      return target ? target->offset() : 0.0;
+    case 8:
+      return (double) n_fit;
   }
   return 0.0;
 }
@@ -285,6 +362,7 @@ void FixMADIr::write()
           cfg.dt_fs);
   fprintf(fp, "# lags %d of %d (acf_ratio %.4g)   bin %.6g cm^-1   resolution %.6g cm^-1\n",
           res.n_lag, res.n_frames, cfg.acf_ratio, res.d_nu, res.resolution);
+  fprintf(fp, "# correlating %s\n", cfg.correlate.c_str());
   fprintf(fp, "# Nyquist %.6g cm^-1   window %s   weighting %s", res.nyquist, cfg.window.c_str(),
           cfg.quantum_correction.c_str());
   if (cfg.quantum_correction == "harmonic") fprintf(fp, " at %.4g K", cfg.temperature);
@@ -293,6 +371,15 @@ void FixMADIr::write()
           cfg.smooth_kind.c_str(), res.mu_mean[0], res.mu_mean[1], res.mu_mean[2]);
   fprintf(fp, "# peak %.10e   peak_power %.10e   (divide out to recover the raw transform)\n",
           res.peak, res.peak_power);
+  if (target) {
+    // Overlay the experiment as scale*intensity + offset; those two numbers
+    // are here so the overlay cannot be drawn with a different fit than the
+    // one the misfit was computed from.
+    fprintf(fp, "# target rel_error %.10f   dissimilarity %.10e   over %d points of [%g, %g]\n",
+            rel_err, dissim, n_fit, fit_nu.empty() ? 0.0 : fit_nu.front(),
+            fit_nu.empty() ? 0.0 : fit_nu.back());
+    fprintf(fp, "# target fit scale %.10e   offset %.10e\n", target->scale(), target->offset());
+  }
   fprintf(fp, "# nu[cm^-1]  intensity  power\n");
   for (int k = 0; k < res.n_freq; k++)
     fprintf(fp, "%20.10f %24.16e %24.16e\n", res.freq[k], res.intensity[k], res.power[k]);

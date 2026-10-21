@@ -31,6 +31,7 @@ FixStyle(mad/ir,FixMADIr);
 
 namespace LAMMPS_NS {
 class ComputeMADProperty;
+class MADTarget;
 
 /* An infrared spectrum from the total dipole of a running trajectory.
 
@@ -52,6 +53,17 @@ class ComputeMADProperty;
 
    Two things that surprise people, both written into the output header rather
    than left to be discovered:
+
+   WITH A TARGET IT SCORES, IT STILL DOES NOT BIAS. Giving this fix an
+   experimental spectrum buys a misfit and nothing else: no force, for the
+   reason above. That is enough to make the spectrum an objective -- which is
+   what a search over structures needs -- without pretending the gradient
+   exists.
+
+   The comparison window is not the prediction grid. The grid starts at nu = 0
+   and runs to nu_max; a measured curve covers neither end, and MADTarget
+   refuses to extrapolate. So the overlap is taken, and it is recomputed every
+   transform because n_freq grows while the buffer fills.
 
    RESOLUTION IS THE LONGEST LAG, NOT THE RUN LENGTH. acf_ratio is the fraction
    of the buffer kept as lags; a long run with a short lag window gives a
@@ -89,10 +101,19 @@ class FixMADIr : public Fix {
   char *outfile;
   bigint last_transform;
 
+  MADTarget *target;
+  double fit_nu_min, fit_nu_max;
+  double rel_err, dissim;
+  int n_fit;
+  std::vector<double> fit_nu, fit_y;
+
   void collect();
   bool transform_now();
   void write();
   double frame_dt_fs() const;
+
+  // Resample the target onto the overlap and leave the misfit in rel_err.
+  void score();
 };
 
 }    // namespace LAMMPS_NS

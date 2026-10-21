@@ -226,6 +226,21 @@ bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfi
     return false;
   }
 
+  // The backward difference costs one frame and a constant factor; the
+  // factor matters only to the absolute units, which a fitted scale absorbs.
+  std::vector<double> rate;
+  if (cfg.correlate == "rate") {
+    rate.resize(3 * (n_frames - 1));
+    for (int t = 1; t < n_frames; t++)
+      for (int d = 0; d < 3; d++)
+        rate[3 * (t - 1) + d] = (mu[3 * t + d] - mu[3 * (t - 1) + d]) / cfg.dt_fs;
+    mu = rate.data();
+    n_frames -= 1;
+  } else if (cfg.correlate != "dipole") {
+    err = "MADLIB: ir correlate must be dipole or rate, not " + cfg.correlate;
+    return false;
+  }
+
   int L = (int) (n_frames * cfg.acf_ratio);
   if (L < 1) L = 1;
   if (L > n_frames) L = n_frames;
