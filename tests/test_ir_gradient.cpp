@@ -103,8 +103,9 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  double ana[3];
-  mad_ir_newest_gradient(mu.data(), n, cfg, kern, ana);
+  double mean[3], ana[3];
+  mad_ir_series_mean(mu.data(), n, cfg, mean);
+  mad_ir_newest_gradient(mu.data(), n, cfg, mean, kern, ana);
 
   printf("# frames %d   lags %d   freqs %d   correlate %s   qc %s   h %g\n", res.n_frames,
          res.n_lag, res.n_freq, cfg.correlate.c_str(), cfg.quantum_correction.c_str(), h);

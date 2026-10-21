@@ -131,7 +131,7 @@ class FixMADIr : public Fix {
   std::vector<double> fit_nu, fit_y;
   std::vector<int> fit_idx;    // where each fit point sits on the spectrum grid
 
-  int biasing, nevery_kernel;
+  int biasing, nevery_kernel, bias_live, trace;
   bigint warmup, kernel_step;
   double gamma_beg, gamma_end, gamma_now, e_bias;
   double dLdmu[3];             // per unit of the newest total dipole

@@ -405,52 +405,69 @@ bool LAMMPS_NS::mad_ir_acf_gradient(const MADIrConfig &cfg, const MADIrResult &r
 
 /* ---------------------------------------------------------------------- */
 
+void LAMMPS_NS::mad_ir_series_mean(const double *mu, int n_frames, const MADIrConfig &cfg,
+                                   double mean[3])
+{
+  mean[0] = mean[1] = mean[2] = 0.0;
+  if (!cfg.subtract_mean) return;
+
+  if (cfg.correlate == "rate") {
+    // sum of (mu(t+1) - mu(t)) telescopes to the endpoints.
+    if (n_frames < 2) return;
+    const double s = 1.0 / ((double) (n_frames - 1) * cfg.dt_fs);
+    for (int d = 0; d < 3; d++) mean[d] = (mu[3 * (n_frames - 1) + d] - mu[d]) * s;
+    return;
+  }
+  if (n_frames < 1) return;
+  for (int t = 0; t < n_frames; t++)
+    for (int d = 0; d < 3; d++) mean[d] += mu[3 * t + d];
+  for (int d = 0; d < 3; d++) mean[d] /= (double) n_frames;
+}
+
+/* ---------------------------------------------------------------------- */
+
 void LAMMPS_NS::mad_ir_newest_gradient(const double *mu, int n_frames, const MADIrConfig &cfg,
-                                       const std::vector<double> &acf_grad, double dLdmu[3])
+                                       const double mean[3], const std::vector<double> &acf_grad,
+                                       double dLdmu[3])
 {
   dLdmu[0] = dLdmu[1] = dLdmu[2] = 0.0;
-
-  std::string err;
-  std::vector<double> rate;
-  if (!apply_correlate(cfg, mu, n_frames, rate, err)) return;
-
-  const int M = n_frames;
+  const bool rate = (cfg.correlate == "rate");
+  const int M = rate ? n_frames - 1 : n_frames;
   const int L = std::min((int) acf_grad.size(), M);
   if (M < 2 || L < 1) return;
 
-  double mean[3] = {0.0, 0.0, 0.0};
-  if (cfg.subtract_mean) {
-    for (int t = 0; t < M; t++)
-      for (int d = 0; d < 3; d++) mean[d] += mu[3 * t + d];
-    for (int d = 0; d < 3; d++) mean[d] /= (double) M;
-  }
+  // The correlated series, read rather than built.
+  auto dev = [&](int t, int d) {
+    const double v =
+        rate ? (mu[3 * (t + 1) + d] - mu[3 * t + d]) / cfg.dt_fs : mu[3 * t + d];
+    return v - mean[d];
+  };
 
-  // C(tau) = (1/M) sum_a d(a).d(a+tau) with d = mu - <mu>, so the newest frame
-  // enters twice at tau = 0 and once at every other lag -- and also through
-  // <mu> itself, which depends on it. That second route contributes partial
-  // sums of d at both ends of the buffer; because the whole series sums to
-  // zero each is a sum over at most L terms rather than over the buffer, so
-  // carrying it exactly costs O(L) and the gradient is finite-difference
-  // exact instead of right to O(M^-1/2).
+  // C(tau) = (1/M) sum_a d(a).d(a+tau), so the newest frame enters twice at
+  // tau = 0 and once at every other lag -- and also through <mu>, which
+  // depends on it. That second route contributes partial sums of d at both
+  // ends of the buffer; because the whole series sums to zero each is a sum
+  // over at most L terms, so carrying it exactly costs O(L) and the gradient
+  // is finite-difference exact instead of right to O(M^-1/2).
   std::vector<double> front(3 * L, 0.0), back(3 * L, 0.0);
   if (cfg.subtract_mean)
     for (int t = 1; t < L; t++)
       for (int d = 0; d < 3; d++) {
-        front[3 * t + d] = front[3 * (t - 1) + d] + mu[3 * (t - 1) + d] - mean[d];
-        back[3 * t + d] = back[3 * (t - 1) + d] + mu[3 * (M - t) + d] - mean[d];
+        front[3 * t + d] = front[3 * (t - 1) + d] + dev(t - 1, d);
+        back[3 * t + d] = back[3 * (t - 1) + d] + dev(M - t, d);
       }
 
   const double invM = 1.0 / (double) M;
   for (int d = 0; d < 3; d++) {
-    double acc = 2.0 * acf_grad[0] * (mu[3 * (M - 1) + d] - mean[d]) * invM;
+    double acc = 2.0 * acf_grad[0] * dev(M - 1, d) * invM;
     for (int t = 1; t < L; t++)
-      acc += acf_grad[t] * ((mu[3 * (M - 1 - t) + d] - mean[d]) * invM +
-                            (front[3 * t + d] + back[3 * t + d]) * invM * invM);
+      acc += acf_grad[t] *
+          (dev(M - 1 - t, d) * invM + (front[3 * t + d] + back[3 * t + d]) * invM * invM);
     dLdmu[d] = acc;
   }
 
   // One more link when the rate was correlated: eta = (mu - mu_prev)/dt, and
   // mu_prev is part of the frozen past.
-  if (cfg.correlate == "rate")
+  if (rate)
     for (int d = 0; d < 3; d++) dLdmu[d] /= cfg.dt_fs;
 }

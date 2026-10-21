@@ -118,11 +118,21 @@ void mad_ir_autocorrelation(const double *mu, int n_frames, bool subtract_mean,
 bool mad_ir_acf_gradient(const MADIrConfig &cfg, const MADIrResult &res, const double *dLdI,
                          std::vector<double> &acf_grad, std::string &err);
 
+// The mean of whatever is being correlated. O(1) under "rate", where the
+// backward differences telescope.
+void mad_ir_series_mean(const double *mu, int n_frames, const MADIrConfig &cfg, double mean[3]);
+
 // dL/d(newest stored dipole), the past held fixed, from S and the same buffer
 // the spectrum was taken of. Under correlate "rate" the chain through
 // (mu - mu_prev)/dt is included, so the result is per unit dipole either way.
+//
+// O(n_lag), and it has to be: this runs every time a frame is stored, so
+// anything proportional to the buffer length here is quadratic in the run.
+// That is why the mean comes in as an argument rather than being summed, and
+// why the differenced series is indexed rather than materialised.
 void mad_ir_newest_gradient(const double *mu, int n_frames, const MADIrConfig &cfg,
-                            const std::vector<double> &acf_grad, double dLdmu[3]);
+                            const double mean[3], const std::vector<double> &acf_grad,
+                            double dLdmu[3]);
 
 }    // namespace LAMMPS_NS
 

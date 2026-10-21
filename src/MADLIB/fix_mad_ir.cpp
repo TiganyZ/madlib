@@ -41,10 +41,13 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg), propid(nullptr), prop(nullptr), nframes(0), outevery(0), wrote_header(0),
     have_spectrum(0), dt_fs_user(-1.0), outfile(nullptr), last_transform(-1), target(nullptr),
     fit_nu_min(0.0), fit_nu_max(1.0e30), rel_err(0.0), dissim(0.0), n_fit(0), biasing(0),
-    nevery_kernel(100), warmup(0), kernel_step(-1), gamma_beg(0.0), gamma_end(0.0),
-    gamma_now(0.0), e_bias(0.0), lam(nullptr), nmax_lam(0)
+    nevery_kernel(100), bias_live(0), warmup(0), kernel_step(-1), gamma_beg(0.0),
+    gamma_end(0.0), gamma_now(0.0), e_bias(0.0), lam(nullptr), nmax_lam(0)
 {
   if (narg < 5) utils::missing_cmd_args(FLERR, "fix mad/ir", error);
+
+  dLdmu[0] = dLdmu[1] = dLdmu[2] = 0.0;
+  trace = (getenv("MADLIB_IR_TRACE") != nullptr);
 
   nevery = utils::inumeric(FLERR, arg[3], false, lmp);
   if (nevery < 1) error->all(FLERR, "fix mad/ir stride must be positive");
@@ -334,6 +337,7 @@ void FixMADIr::build_kernel()
 void FixMADIr::update_bias()
 {
   dLdmu[0] = dLdmu[1] = dLdmu[2] = 0.0;
+  bias_live = 0;
   ramp_gamma();
 
   // Nothing to push towards until there is a spectrum worth the name. The
@@ -356,7 +360,13 @@ void FixMADIr::update_bias()
   // estimator is the current one while S(tau) is the stale one. Between
   // rebuilds that is a bias_every/M discrepancy, which is why bias_every
   // should stay small against the buffer length.
-  mad_ir_newest_gradient(mu.data(), nframes, cfg, kern, dLdmu);
+  //
+  // O(1) under correlate rate, where the differences telescope; under
+  // correlate dipole this is the one O(T) step left in the per-frame path,
+  // which is another reason not to bias on that one.
+  double mean[3];
+  mad_ir_series_mean(mu.data(), nframes, cfg, mean);
+  mad_ir_newest_gradient(mu.data(), nframes, cfg, mean, kern, dLdmu);
 
   // The loss is a sum over STORED frames, so the gradient belongs to one
   // sampling interval, not to one step. Spreading it over the nevery steps
@@ -364,6 +374,7 @@ void FixMADIr::update_bias()
   // independent of the stride -- the same reason MADTarget normalises its
   // weights to mean one.
   for (int d = 0; d < 3; d++) dLdmu[d] /= (double) nevery;
+  bias_live = 1;
 }
 
 void FixMADIr::grow_lambda()
@@ -378,22 +389,33 @@ void FixMADIr::post_force(int vflag)
 {
   v_init(vflag);
   for (int i = 0; i < 6; i++) virial[i] = 0.0;
-  if (dLdmu[0] == 0.0 && dLdmu[1] == 0.0 && dLdmu[2] == 0.0) return;
+
+  // Whether to push is decided from step numbers alone, never from the value
+  // of dLdmu. The adjoint ends in a reverse communication, so a rank that
+  // skipped it leaves the others waiting for a message that never comes --
+  // which is what an uninitialised dLdmu did here, one rank reading a
+  // denormal and entering while the other read zero and returned. Every term
+  // bias_live is built from is identical on every rank by construction.
+  if (!bias_live) return;
 
   // The total dipole is a plain sum over atoms, so every atom in the group
   // carries the same dL/dmu; the model turns that into a force through its
   // own dmu_i/dr_j, which for a charge model is q_i and for anything else is
   // a backward pass.
+  if (trace)
+    fprintf(stderr, "[rank %d step " BIGINT_FORMAT "] adjoint, dLdmu %g %g %g\n", comm->me,
+            update->ntimestep, dLdmu[0], dLdmu[1], dLdmu[2]);
   grow_lambda();
   const int nlocal = atom->nlocal;
   const int *mask = atom->mask;
   for (int i = 0; i < nlocal; i++)
     for (int d = 0; d < 3; d++) lam[i][d] = (mask[i] & groupbit) ? dLdmu[d] : 0.0;
 
-  // Re-evaluated because a backend whose adjoint reuses its forward pass
-  // would otherwise contract against the previous step's descriptors. For the
-  // charge model this is O(N) and the call could be skipped.
-  prop->compute_property();
+  // Only for a backend whose adjoint reads what the forward pass left behind;
+  // it would otherwise contract against the previous step's descriptors. The
+  // charge dipole needs nothing, and skipping it there avoids rebuilding its
+  // anchor map over every ghost on every step.
+  if (prop->adjoint_needs_forward()) prop->compute_property();
   prop->adjoint(lam, virial);
 }
 

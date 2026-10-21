@@ -71,6 +71,7 @@ class ComputeMADPropertyDipole : public ComputeMADProperty {
   void compute_peratom() override;
   void compute_property() override;
   void adjoint(double **lambda, double *virial) override;
+  bool adjoint_needs_forward() const override { return false; }
 
  private:
   double *bytype;
