@@ -99,6 +99,31 @@ bool mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfig &cfg, MAD
 void mad_ir_autocorrelation(const double *mu, int n_frames, bool subtract_mean,
                             std::vector<double> &acf, double mu_mean[3]);
 
+/* THE BIAS, IN TWO PIECES.
+
+   A spectrum is a functional of the whole trajectory, so there is no exact
+   gradient with respect to a configuration that is still free to move. What
+   there is, and what TurboGAP uses, is the FROZEN-PAST partial: differentiate
+   with respect to the newest stored frame holding every earlier one fixed.
+   The result is not the gradient of anything -- see fix_mad_ir.h -- but it is
+   the thing that pumps a band the experiment says is too weak.
+
+   Split in two because the halves have different costs. S(tau) needs the
+   spectrum and the target and is O(n_lag * n_freq); the contraction onto the
+   newest frame is O(n_lag) and has to run whenever a frame is stored. */
+
+// S(tau) = dL/dC(tau), given dL/dI on the spectrum's own frequency grid.
+// Refuses when smoothing is on: that is a second linear map whose transpose
+// is not applied here, and the lag window already sets the resolution.
+bool mad_ir_acf_gradient(const MADIrConfig &cfg, const MADIrResult &res, const double *dLdI,
+                         std::vector<double> &acf_grad, std::string &err);
+
+// dL/d(newest stored dipole), the past held fixed, from S and the same buffer
+// the spectrum was taken of. Under correlate "rate" the chain through
+// (mu - mu_prev)/dt is included, so the result is per unit dipole either way.
+void mad_ir_newest_gradient(const double *mu, int n_frames, const MADIrConfig &cfg,
+                            const std::vector<double> &acf_grad, double dLdmu[3]);
+
 }    // namespace LAMMPS_NS
 
 #endif

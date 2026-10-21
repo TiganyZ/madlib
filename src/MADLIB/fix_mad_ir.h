@@ -54,7 +54,29 @@ class MADTarget;
    Two things that surprise people, both written into the output header rather
    than left to be discovered:
 
-   WITH A TARGET IT SCORES, IT STILL DOES NOT BIAS. Giving this fix an
+   WITH A TARGET AND A GAMMA IT BIASES, AND WHAT IT APPLIES IS NOT A GRADIENT.
+   A spectrum is a functional of the whole trajectory while only the newest
+   frame can still be moved, so what the force comes from is the FROZEN-PAST
+   partial derivative: differentiate holding every earlier frame fixed. The
+   reported bias energy is therefore NOT the generator of the reported force,
+   which is why this fix contributes nothing to the potential energy -- adding
+   a non-generating term to pe makes the total energy's drift unreadable as an
+   integration diagnostic, and that has already cost one spectrum its
+   interpretation elsewhere. The loss is on the global vector instead.
+
+   WHAT IS CORRELATED DECIDES WHETHER THE BIAS WORKS AT ALL, and the
+   difference is not subtle. Under correlate "dipole" the multiplier lands in
+   phase with each mode's DISPLACEMENT, so it retunes bands rather than doing
+   work on them; measured against the Downing water spectrum that scored worse
+   than no bias at all. Under "rate" it lands in phase with each mode's
+   VELOCITY, pumping a band the experiment says is too weak and draining one
+   it says is too strong -- a frequency-resolved friction, which is to say a
+   generalized Langevin bias with the target spectrum in the part of the bath.
+   Same comparison, better by more than an order of magnitude. So the bias
+   wants correlate rate and qc none; nothing here enforces that pairing,
+   because "which estimator" is a question the prediction path asks too.
+
+   WITH A TARGET IT SCORES, AND WITHOUT A GAMMA THAT IS ALL IT DOES. Giving this fix an
    experimental spectrum buys a misfit and nothing else: no force, for the
    reason above. That is enough to make the spectrum an objective -- which is
    what a search over structures needs -- without pretending the gradient
@@ -81,6 +103,7 @@ class FixMADIr : public Fix {
   int setmask() override;
   void init() override;
   void setup(int) override;
+  void post_force(int) override;
   void end_of_step() override;
   void post_run() override;
 
@@ -106,6 +129,16 @@ class FixMADIr : public Fix {
   double rel_err, dissim;
   int n_fit;
   std::vector<double> fit_nu, fit_y;
+  std::vector<int> fit_idx;    // where each fit point sits on the spectrum grid
+
+  int biasing, nevery_kernel;
+  bigint warmup, kernel_step;
+  double gamma_beg, gamma_end, gamma_now, e_bias;
+  double dLdmu[3];             // per unit of the newest total dipole
+  std::vector<double> kern;    // S(tau) = dL/dC(tau)
+  std::vector<double> dLdI;    // on the spectrum's own grid
+  double **lam;                // (nmax x 3) handed to the compute's adjoint
+  int nmax_lam;
 
   void collect();
   bool transform_now();
@@ -114,6 +147,11 @@ class FixMADIr : public Fix {
 
   // Resample the target onto the overlap and leave the misfit in rel_err.
   void score();
+
+  void ramp_gamma();
+  void build_kernel();    // the expensive half, every nevery_kernel steps
+  void update_bias();     // the cheap half, every time a frame is stored
+  void grow_lambda();
 };
 
 }    // namespace LAMMPS_NS

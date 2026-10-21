@@ -160,7 +160,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir dipolemodel quip torch mliap nmr}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir irgradient dipolemodel quip torch mliap nmr}
 
 for w in $want; do
 case $w in
@@ -391,6 +391,31 @@ sys.exit(0 if r1 < 0.5 * r0 else 1)
 PY
     if [ $? -eq 0 ]; then ok "the bias closes the gap on a real potential"
     else bad "the bias did not improve the fit"; fi
+  fi
+  ;;
+
+irgradient)
+  leg "the frozen-past IR gradient against a finite difference of its own loss"
+  MADGRAD=/tmp/mad_ir_gradient
+  g++ -O2 -std=c++17 -o $MADGRAD test_ir_gradient.cpp ../src/MADLIB/mad_ir_spectrum.cpp -lm \
+      2>/tmp/mad_irgrad_build.log
+  if [ ! -x $MADGRAD ]; then
+    sed 's/^/     /' /tmp/mad_irgrad_build.log | head -10
+    bad "could not build the IR gradient driver"
+  else
+    # Both correlators and both ends of the weighting, because the chain
+    # differs in each: "rate" adds the backward difference and "classical"
+    # puts a nu^2 between dL/dI and dL/dC.
+    for pair in "rate none" "dipole classical" "rate classical" "dipole none"; do
+      set -- $pair
+      out=$($MADGRAD data/ir_dipoles.dat 1.0 hann 0.25 4000 "$2" "$1" 1e-3 1e-6 2>&1)
+      if [ $? -eq 0 ]; then
+        ok "correlate $1, qc $2: $(echo "$out" | tail -1 | sed 's/^# //')"
+      else
+        echo "$out" | sed 's/^/     /'
+        bad "correlate $1, qc $2: the gradient disagrees with finite differences"
+      fi
+    done
   fi
   ;;
 

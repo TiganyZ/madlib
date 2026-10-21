@@ -24,6 +24,7 @@
 #include "error.h"
 #include "force.h"
 #include "mad_target.h"
+#include "memory.h"
 #include "modify.h"
 #include "update.h"
 
@@ -39,7 +40,9 @@ using namespace FixConst;
 FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
     Fix(lmp, narg, arg), propid(nullptr), prop(nullptr), nframes(0), outevery(0), wrote_header(0),
     have_spectrum(0), dt_fs_user(-1.0), outfile(nullptr), last_transform(-1), target(nullptr),
-    fit_nu_min(0.0), fit_nu_max(1.0e30), rel_err(0.0), dissim(0.0), n_fit(0)
+    fit_nu_min(0.0), fit_nu_max(1.0e30), rel_err(0.0), dissim(0.0), n_fit(0), biasing(0),
+    nevery_kernel(100), warmup(0), kernel_step(-1), gamma_beg(0.0), gamma_end(0.0),
+    gamma_now(0.0), e_bias(0.0), lam(nullptr), nmax_lam(0)
 {
   if (narg < 5) utils::missing_cmd_args(FLERR, "fix mad/ir", error);
 
@@ -100,6 +103,25 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
     } else if (strcmp(arg[iarg], "write_every") == 0) {
       outevery = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "gamma") == 0) {
+      if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir gamma", error);
+      gamma_beg = gamma_end = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
+      // A second number ramps it, which is how a restraint is switched on
+      // without kicking the trajectory apart on the first biased step.
+      if (iarg < narg && utils::is_double(arg[iarg])) {
+        gamma_end = utils::numeric(FLERR, arg[iarg], false, lmp);
+        iarg++;
+      }
+    } else if (strcmp(arg[iarg], "bias_every") == 0) {
+      if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir bias_every", error);
+      nevery_kernel = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
+      if (nevery_kernel < 1) error->all(FLERR, "fix mad/ir bias_every must be positive");
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "warmup") == 0) {
+      if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir warmup", error);
+      warmup = utils::bnumeric(FLERR, arg[iarg + 1], false, lmp);
+      iarg += 2;
     } else if (strcmp(arg[iarg], "target") == 0) {
       if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "fix mad/ir target", error);
       targetfile = arg[iarg + 1];
@@ -132,6 +154,10 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
     error->all(FLERR, "fix mad/ir fit and fit_range need a target to compare against");
   }
 
+  biasing = (target && gamma_end != 0.0) ? 1 : 0;
+  if (gamma_end != 0.0 && !target)
+    error->all(FLERR, "fix mad/ir gamma needs a target to bias towards");
+
   auto *cmp = modify->get_compute_by_id(propid);
   if (!cmp) error->all(FLERR, "fix mad/ir could not find compute {}", propid);
   prop = dynamic_cast<ComputeMADProperty *>(cmp);
@@ -151,8 +177,11 @@ FixMADIr::FixMADIr(LAMMPS *lmp, int narg, char **arg) :
   datamask_read = X_MASK | F_MASK | TYPE_MASK | MASK_MASK;
   datamask_modify = F_MASK;
   extscalar = 0;
+  // The force contributes to the stress, so the virial is real and is
+  // reported. The loss is not, because it does not generate that force.
+  if (biasing) virial_global_flag = thermo_virial = 1;
   vector_flag = 1;
-  size_vector = 9;
+  size_vector = 11;
   extvector = 0;
   array_flag = 1;
   size_array_rows = 0;
@@ -169,11 +198,14 @@ FixMADIr::~FixMADIr()
   delete[] propid;
   delete[] outfile;
   delete target;
+  memory->destroy(lam);
 }
 
 int FixMADIr::setmask()
 {
-  return END_OF_STEP | POST_RUN;
+  int mask = END_OF_STEP | POST_RUN;
+  if (biasing) mask |= POST_FORCE;
+  return mask;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -205,11 +237,33 @@ void FixMADIr::init()
                "stored-frame interval of {:.4g} fs; sample more often",
                cfg.max_freq_cm, nyq, cfg.dt_fs);
 
-  if (comm->me == 0)
+  if (biasing) {
+    // collect() sums over this fix's group while the adjoint masks by the
+    // compute's, so two different groups would bias a dipole nobody summed.
+    if (igroup != prop->igroup)
+      error->all(FLERR,
+                 "fix mad/ir biases the dipole it sums, so it and compute {} must be on the "
+                 "same group",
+                 propid);
+    if (cfg.correlate != "rate" && comm->me == 0)
+      error->warning(FLERR,
+                     "fix mad/ir is biasing on correlate {}: the multiplier then lands in "
+                     "phase with each mode's displacement and retunes bands rather than "
+                     "pumping them. correlate rate with qc none is the pairing that works",
+                     cfg.correlate);
+  }
+
+  if (comm->me == 0) {
     utils::logmesg(lmp,
                    "fix {}: sampling every {} steps = {:.4g} fs, Nyquist {:.1f} cm^-1, "
-                   "weighting '{}'\n",
-                   id, nevery, cfg.dt_fs, nyq, cfg.quantum_correction);
+                   "weighting '{}', correlating '{}'\n",
+                   id, nevery, cfg.dt_fs, nyq, cfg.quantum_correction, cfg.correlate);
+    if (biasing)
+      utils::logmesg(lmp,
+                     "fix {}: biasing with gamma {:.6g} -> {:.6g}, kernel rebuilt every {} "
+                     "steps, warm-up {}\n",
+                     id, gamma_beg, gamma_end, nevery_kernel, warmup);
+  }
 }
 
 void FixMADIr::setup(int)
@@ -245,8 +299,102 @@ void FixMADIr::collect()
 void FixMADIr::end_of_step()
 {
   collect();
+  if (biasing) update_bias();
   if (outfile && outevery > 0 && (update->ntimestep % outevery) == 0)
     if (transform_now()) write();
+}
+
+/* ---------------------------------------------------------------------- */
+
+void FixMADIr::ramp_gamma()
+{
+  if (gamma_end == gamma_beg || update->endstep <= update->beginstep) {
+    gamma_now = gamma_end;
+    return;
+  }
+  double t = (double) (update->ntimestep - update->beginstep) /
+      (double) (update->endstep - update->beginstep);
+  if (t < 0.0) t = 0.0;
+  if (t > 1.0) t = 1.0;
+  gamma_now = (1.0 - t) * gamma_beg + t * gamma_end;
+}
+
+void FixMADIr::build_kernel()
+{
+  dLdI.assign(res.n_freq, 0.0);
+  std::vector<double> g(n_fit, 0.0);
+  e_bias = target->loss(fit_y.data(), gamma_now, g.data());
+  for (int j = 0; j < n_fit; j++) dLdI[fit_idx[j]] = g[j];
+
+  std::string err;
+  if (!mad_ir_acf_gradient(cfg, res, dLdI.data(), kern, err)) error->all(FLERR, err);
+  kernel_step = update->ntimestep;
+}
+
+void FixMADIr::update_bias()
+{
+  dLdmu[0] = dLdmu[1] = dLdmu[2] = 0.0;
+  ramp_gamma();
+
+  // Nothing to push towards until there is a spectrum worth the name. The
+  // warm-up is the user's statement of when that is; the transform refusing
+  // is the floor underneath it.
+  if (update->ntimestep < warmup) return;
+
+  // Only the rebuild pays for a transform. Re-deriving the spectrum at every
+  // stored frame would put an FFT over the whole buffer inside the MD loop,
+  // which for a cheap potential costs more than the dynamics; S(tau) varies
+  // on the timescale the spectrum does, which is far slower than a frame.
+  if (kernel_step < 0 || update->ntimestep - kernel_step >= nevery_kernel) {
+    if (!transform_now()) return;
+    if (n_fit < 2) return;
+    build_kernel();
+  }
+  if (kern.empty()) return;
+
+  // The buffer has grown since the kernel was built, so the 1/M in the
+  // estimator is the current one while S(tau) is the stale one. Between
+  // rebuilds that is a bias_every/M discrepancy, which is why bias_every
+  // should stay small against the buffer length.
+  mad_ir_newest_gradient(mu.data(), nframes, cfg, kern, dLdmu);
+
+  // The loss is a sum over STORED frames, so the gradient belongs to one
+  // sampling interval, not to one step. Spreading it over the nevery steps
+  // until the next frame keeps the impulse right and keeps gamma's meaning
+  // independent of the stride -- the same reason MADTarget normalises its
+  // weights to mean one.
+  for (int d = 0; d < 3; d++) dLdmu[d] /= (double) nevery;
+}
+
+void FixMADIr::grow_lambda()
+{
+  if (atom->nmax <= nmax_lam) return;
+  memory->destroy(lam);
+  nmax_lam = atom->nmax;
+  memory->create(lam, nmax_lam, 3, "mad/ir:lam");
+}
+
+void FixMADIr::post_force(int vflag)
+{
+  v_init(vflag);
+  for (int i = 0; i < 6; i++) virial[i] = 0.0;
+  if (dLdmu[0] == 0.0 && dLdmu[1] == 0.0 && dLdmu[2] == 0.0) return;
+
+  // The total dipole is a plain sum over atoms, so every atom in the group
+  // carries the same dL/dmu; the model turns that into a force through its
+  // own dmu_i/dr_j, which for a charge model is q_i and for anything else is
+  // a backward pass.
+  grow_lambda();
+  const int nlocal = atom->nlocal;
+  const int *mask = atom->mask;
+  for (int i = 0; i < nlocal; i++)
+    for (int d = 0; d < 3; d++) lam[i][d] = (mask[i] & groupbit) ? dLdmu[d] : 0.0;
+
+  // Re-evaluated because a backend whose adjoint reuses its forward pass
+  // would otherwise contract against the previous step's descriptors. For the
+  // charge model this is O(N) and the call could be skipped.
+  prop->compute_property();
+  prop->adjoint(lam, virial);
 }
 
 void FixMADIr::post_run()
@@ -289,12 +437,18 @@ void FixMADIr::score()
   const double lo = std::max(fit_nu_min, target->range_min());
   const double hi = std::min(fit_nu_max, target->range_max());
 
+  // intensity_raw, not intensity: the fitted scale makes the peak
+  // normalisation irrelevant to the misfit, and keeping it out of the chain
+  // means dL/dI is a derivative of what the estimator actually produced
+  // rather than of a quantity divided by its own maximum.
   fit_nu.clear();
   fit_y.clear();
+  fit_idx.clear();
   for (int k = 0; k < res.n_freq; k++) {
     if (res.freq[k] < lo || res.freq[k] > hi) continue;
     fit_nu.push_back(res.freq[k]);
-    fit_y.push_back(res.intensity[k]);
+    fit_y.push_back(res.intensity_raw[k]);
+    fit_idx.push_back(k);
   }
   if ((int) fit_nu.size() < 2) return;
 
@@ -334,6 +488,10 @@ double FixMADIr::compute_vector(int n)
       return target ? target->offset() : 0.0;
     case 8:
       return (double) n_fit;
+    case 9:
+      return gamma_now;
+    case 10:
+      return e_bias;
   }
   return 0.0;
 }
@@ -379,6 +537,11 @@ void FixMADIr::write()
             rel_err, dissim, n_fit, fit_nu.empty() ? 0.0 : fit_nu.front(),
             fit_nu.empty() ? 0.0 : fit_nu.back());
     fprintf(fp, "# target fit scale %.10e   offset %.10e\n", target->scale(), target->offset());
+    if (biasing)
+      fprintf(fp,
+              "# bias gamma %.6g   loss %.10e   (frozen-past partial, NOT the generator of "
+              "the force, and not added to the potential energy)\n",
+              gamma_now, e_bias);
   }
   fprintf(fp, "# nu[cm^-1]  intensity  power\n");
   for (int k = 0; k < res.n_freq; k++)
