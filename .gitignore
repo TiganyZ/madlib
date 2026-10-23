@@ -14,3 +14,4 @@ tests/*.dump
 tests/in.ir_guard.log
 tests/.run.lock/
 tests/data/gap_files/
+.madlib_commit

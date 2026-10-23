@@ -86,6 +86,13 @@ is a reverse Monte Carlo run. Measured on the 91-atom glassy-carbon test case:
 the bias takes the swap acceptance from 1200/1200 to 335/1200 and the relative
 error from 0.371 to 0.109.
 
+## Examples
+
+[`examples/grace_lifco`](examples/grace_lifco/README.md): generate
+configurations with MAD under a GRACE foundation model, label them, fine-tune
+the model with `gracemaker`, and run MAD again with the fine-tuned model and its
+extrapolation grade. Li–F–C–O, pinned end to end.
+
 ## Commands
 
 ### `compute ID group mad/pdf r <rmin> <rmax> <nbins> [keyword value ...]`
