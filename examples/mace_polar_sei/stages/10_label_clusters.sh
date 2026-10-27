@@ -14,9 +14,9 @@ if [ "$REFERENCE" = aims ]; then
 else
     TEMPLATE=training.yaml
 fi
-OUT=$WORK/02_label/$FLOW
+OUT=$COMBINED/10_label_clusters/$FLOW
 done_if "$OUT/labelled.xyz"
-need "$WORK/01_clusters/clusters.xyz" "run stage 01 first"
+need "$COMBINED/09_clusters/clusters.xyz" "run stage 09 first"
 mkdir -p "$OUT"
 
 autoplex() {
@@ -27,7 +27,7 @@ write_settings() {
     local repo
     repo=$(source "$AUTOPLEX_ENV" && echo "$AUTOPLEX_REPO")
     sed -e "s|^name: .*|name: $FLOW|" \
-        -e "s|^  initial: .*|  initial: $WORK/01_clusters/clusters.xyz|" \
+        -e "s|^  initial: .*|  initial: $COMBINED/09_clusters/clusters.xyz|" \
         -e "s|^species_list: .*|species_list: [${SPECIES// /, }]|" \
         -e "s|^  hyperparameters_file: .*|  hyperparameters_file: $repo/workflows/sei_response/gap_hypers.yaml|" \
         "$repo/workflows/sei_response/$TEMPLATE" > "$OUT/training.yaml"

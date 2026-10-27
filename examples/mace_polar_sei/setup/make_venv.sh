@@ -1,5 +1,6 @@
 #!/bin/bash
-# The MACE venv on Triton (run on a login node): torch with CUDA wheels, mace-torch[polar], torch-dftd.
+# The MACE venv (alt, or a Triton login node): torch with CUDA wheels, mace-torch[polar], torch-dftd.
+# uv's own Python, which carries the headers and libpython the LAMMPS Python module links to.
 set -eu
 PREFIX=${PREFIX:-/scratch/work/zarrout1/mace-polar}
 UV=${UV:-$HOME/.local/bin/uv}
@@ -13,7 +14,7 @@ export UV_CACHE_DIR=$PREFIX/uv_cache
 export XDG_CACHE_HOME=$PREFIX/cache
 
 make_venv() {
-    [ -x "$PREFIX/venv/bin/python" ] || "$UV" venv -q -p 3.12 "$PREFIX/venv"
+    [ -x "$PREFIX/venv/bin/python" ] || "$UV" venv -q -p 3.12 --python-preference only-managed "$PREFIX/venv"
     VIRTUAL_ENV=$PREFIX/venv "$UV" pip install -q --index-strategy unsafe-best-match \
         --extra-index-url "$CUDA_INDEX" "torch==$TORCH" "mace-torch[polar]==$MACE" torch-dftd
 }

@@ -1,0 +1,24 @@
+# Fixed cell (graphite sets y and z): NVT anneal with PolarMACE. -var data -var seed -var tmelt -var out, plus mace_potential.lmp's
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       ${data}
+include         ${potential}
+neighbor        1.0 bin
+timestep        0.0005
+
+thermo_style    custom step temp pe press
+thermo_modify   flush yes
+thermo          1000
+
+minimize        1.0e-6 1.0e-3 1000 10000
+velocity        all create ${tmelt} ${seed} mom yes rot yes dist gaussian
+fix             md all nvt temp ${tmelt} ${tmelt} 0.05
+run             20000
+unfix           md
+fix             md all nvt temp ${tmelt} 300.0 0.05
+run             20000
+unfix           md
+fix             md all nvt temp 300.0 300.0 0.05
+run             10000
+write_data      ${out}

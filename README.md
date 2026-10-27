@@ -62,7 +62,7 @@ fix swap all atom/swap 5 20 29494 300.0 ke no types 1 2
 |---|---|
 | [`examples/grace_lifco`](examples/grace_lifco/README.md) | generate configurations with MAD, label them, fine-tune a GRACE model on them, and run MAD with the fine-tuned model |
 | [`examples/grace_sei_na`](examples/grace_sei_na/README.md) | the same pipeline over several systems that make up a graphite / SEI / electrolyte interface |
-| [`examples/mace_polar_sei`](examples/mace_polar_sei/README.md) | fine-tune MACE-POLAR-1 and a dipole/polarizability model, then equilibrate interface slabs |
+| [`examples/mace_polar_sei`](examples/mace_polar_sei/README.md) | the same with MACE-POLAR-1 throughout, driving MAD through `fix external`; adds a dipole/polarizability model and equilibrates interface slabs |
 
 ## Commands
 

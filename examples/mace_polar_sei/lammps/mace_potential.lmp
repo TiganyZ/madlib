@@ -1,0 +1,12 @@
+# PolarMACE for the whole cell through fix external (stages/mace_lammps.py), and D3(BJ) as a
+# LAMMPS pair style on the CPU. Needs the string variables stages, model, species, device, dtype, d3.
+if "${d3} == yes" then &
+   "pair_style dispersion/d3 bj pbe 15.0 10.0" &
+   "pair_coeff * * ${species}" &
+else &
+   "pair_style zero 6.0" &
+   "pair_coeff * *"
+fix             ext all external pf/callback 1 1
+fix_modify      ext energy yes virial yes
+python          attach input 1 SELF format p file ${stages}/mace_lammps.py
+python          attach invoke
