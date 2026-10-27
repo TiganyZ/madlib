@@ -9,7 +9,7 @@ cd "$OUT"
 if [ ! -f frames.dump ]; then
     "$PY" -I "$EX/stages/reference_md.py" "$WORK/03_melt_quench/quenched.data" \
         "$GRACE_CACHE/$LABELLER" "$REF_TEMP" "$REF_EQUIL_STEPS" "$REF_SAMPLE_STEPS" "$REF_EVERY" \
-        "$SEED" frames.dump.part
+        "$SEED" frames.dump.part "$SPECIES"
     mv frames.dump.part frames.dump
 fi
 "$PY" -I "$EX/stages/xrd_files.py" placeholder placeholder.dat

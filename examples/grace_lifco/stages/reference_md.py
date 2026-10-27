@@ -1,6 +1,6 @@
 """The synthetic experiment: MD with the labeller, frames written as a LAMMPS dump.
 
-    python reference_md.py START MODEL TEMP EQUIL SAMPLE EVERY SEED OUT
+    python reference_md.py START MODEL TEMP EQUIL SAMPLE EVERY SEED OUT [SPECIES]
 """
 
 import sys
@@ -15,7 +15,7 @@ from tensorpotential.calculator import TPCalculator
 
 TIMESTEP_FS = 0.5
 FRICTION = 0.01  # 1/fs
-SPECIES = ["Li", "C", "O", "F"]
+SPECIES = (sys.argv[9] if len(sys.argv) > 9 else "Li C O F").split()
 
 
 def load(path):

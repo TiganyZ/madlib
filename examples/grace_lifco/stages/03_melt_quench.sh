@@ -5,7 +5,7 @@ OUT=$WORK/03_melt_quench
 done_if "$OUT/quenched.data"
 mkdir -p "$OUT"
 cd "$OUT"
-lmp -in "$EX/lammps/in.melt_quench" \
+lmp -in "$MELT_INPUT" \
     -var data "$WORK/01_structures/mixture.data" \
     -var model "$WORK/02_foundation/saved_model.yaml" \
     -var seed "$SEED" -var tmelt "$TMELT" -var out quenched.data

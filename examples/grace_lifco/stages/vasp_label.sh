@@ -5,9 +5,9 @@ set -eu
 source "$(dirname "$0")/lib.sh"
 
 if [ "$VASP_PILOT" -gt 0 ]; then
-    FLOW=lifco_mad_${NAME}_pilot$VASP_PILOT
+    FLOW=${VASP_FLOW}_${NAME}_pilot$VASP_PILOT
 else
-    FLOW=lifco_mad_$NAME
+    FLOW=${VASP_FLOW}_$NAME
 fi
 OUT=$WORK/07_label/$FLOW
 done_if "$OUT/labelled.xyz"
@@ -22,6 +22,7 @@ write_settings() {
     repo=$(source "$AUTOPLEX_ENV" && echo "$AUTOPLEX_REPO")
     sed -e "s|^name: .*|name: $FLOW|" \
         -e "s|^  initial: .*|  initial: $WORK/06_select/to_label.xyz|" \
+        -e "s|^species_list: .*|species_list: [${SPECIES// /, }]|" \
         -e "s|^  hyperparameters_file: .*|  hyperparameters_file: $repo/workflows/lico/gap_hypers.yaml|" \
         "$repo/workflows/lifco_mad/training.yaml" > "$OUT/training.yaml"
     if [ "$VASP_PILOT" -gt 0 ]; then

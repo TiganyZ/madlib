@@ -30,7 +30,7 @@ def split(selected, crystals, fraction, seed, outdir):
     test_idx, train_idx = stratified(names, fraction, np.random.default_rng(seed))
     test = pd.DataFrame({"name": [names[i] for i in test_idx],
                          "ase_atoms": [atoms[i] for i in test_idx]})
-    xtal = read(crystals, index=":")
+    xtal = read(crystals, index=":") if Path(crystals).exists() else []
     train = pd.DataFrame({"name": [names[i] for i in train_idx] + [a.info["config_type"] for a in xtal],
                           "ase_atoms": [atoms[i] for i in train_idx] + xtal})
     outdir.mkdir(parents=True, exist_ok=True)

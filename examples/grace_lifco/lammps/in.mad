@@ -4,16 +4,17 @@ units           metal
 atom_style      atomic
 boundary        p p p
 read_data       ${start}
+variable        species index "Li C O F"
 
 pair_style      ${pair}
-pair_coeff      * * ${coeff} Li C O F
+pair_coeff      * * ${coeff} ${species}
 neighbor        1.0 bin
 timestep        0.0005
 comm_modify     cutoff 9.0
 
 compute         gr all mad/pdf r 0.1 6.0 201 kde 0.1
 fix             xrd all mad/xrd c_gr target ${target} q 1.0 10.0 181 output qFq &
-                species Li C O F gamma ${gamma} file ${prefix}_xrd.dat write_every ${every}
+                species ${species} gamma ${gamma} file ${prefix}_xrd.dat write_every ${every}
 
 variable        extrap index 0
 if "${extrap} == 1" then &
@@ -30,5 +31,5 @@ thermo_style    custom step temp pe f_xrd f_xrd[2] f_xrd[3] press v_gmax
 thermo_modify   flush yes
 thermo          ${every}
 dump            traj all custom ${every} ${prefix}.dump id type element x y z
-dump_modify     traj element Li C O F sort id format float %20.12g
+dump_modify     traj element ${species} sort id format float %20.12g
 run             ${steps}

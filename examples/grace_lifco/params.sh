@@ -3,6 +3,10 @@ NAME=${NAME:-lifco}
 WORK=$RUNS/$NAME
 NRANKS=8
 
+SPECIES="Li C O F"            # LAMMPS type order of every data file
+STRUCTURES=$EX/stages/structures.py
+MELT_INPUT=$EX/lammps/in.melt_quench
+
 TMELT=1300
 REF_TEMP=300
 REF_EQUIL_STEPS=1500
@@ -24,3 +28,4 @@ VASP_PILOT=${VASP_PILOT:-0}    # >0: label only this many frames, under a separa
 VASP_POLL=600                  # s between status checks
 FT_WHERE=${FT_WHERE:-local}    # local | triton (GPU job through autoplex_soap_turbo/workflows/grace_finetune)
 FT_POLL=120                    # s between status checks
+VASP_FLOW=lifco_mad             # flow name prefix for LABEL=vasp

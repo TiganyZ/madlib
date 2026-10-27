@@ -15,7 +15,7 @@ case $LABEL in
     vasp)
         VASP_PILOT=0 bash "$EX/stages/vasp_label.sh"
         for split in train test; do
-            "$PY" -I "$EX/stages/label_import.py" "$OUT/lifco_mad_$NAME/labelled.xyz" \
+            "$PY" -I "$EX/stages/label_import.py" "$OUT/${VASP_FLOW}_$NAME/labelled.xyz" \
                 "$WORK/06_select/${split}_unlabelled.pkl.gz" "$split.pkl.gz"
         done ;;
 esac

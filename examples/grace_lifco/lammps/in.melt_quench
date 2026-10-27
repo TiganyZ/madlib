@@ -3,9 +3,10 @@ units           metal
 atom_style      atomic
 boundary        p p p
 read_data       ${data}
+variable        species index "Li C O F"
 
 pair_style      grace/fs
-pair_coeff      * * ${model} Li C O F
+pair_coeff      * * ${model} ${species}
 neighbor        1.0 bin
 timestep        0.0005
 

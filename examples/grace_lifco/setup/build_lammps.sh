@@ -10,7 +10,7 @@ checkout() {
     local repo=$1 commit=$2 dir=$3
     say "$repo $commit"
     [ -d "$dir/.git" ] || git clone -q --filter=blob:none "$repo" "$dir"
-    git -C "$dir" fetch -q origin "$commit"
+    git -C "$dir" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$dir" fetch -q origin "$commit"
     git -C "$dir" checkout -q --force "$commit"
     git -C "$dir" clean -qfd src cmake
 }
@@ -56,6 +56,7 @@ configure() {
         -D PKG_MANYBODY=on \
         -D PKG_MOLECULE=on \
         -D PKG_EXTRA-FIX=on \
+        -D PKG_EXTRA-PAIR=on \
         -D PKG_MC=on \
         -D PKG_MADLIB=on
 }
