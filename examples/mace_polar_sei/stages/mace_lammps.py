@@ -1,4 +1,4 @@
-"""PolarMACE as the potential of a LAMMPS run, through fix external.
+"""PolarMACE (or another MACE, see calc.foundation) as the potential of a LAMMPS run, through fix external.
 
 PolarMACE's electrostatics is a k-space sum over the whole cell, so it cannot be
 a LAMMPS pair style working on local atoms and ghosts. `lammps/mace_potential.lmp`
@@ -11,7 +11,7 @@ from ase import Atoms
 from ase.data import atomic_numbers
 from lammps import LMP_VAR_STRING, lammps
 
-from calc import polar
+from calc import foundation
 
 FIX_ID = "ext"
 STATE = {}
@@ -50,5 +50,5 @@ def attach(ptr):
     lmp = lammps(ptr=ptr)
     species = variable(lmp, "species").split()
     STATE["numbers"] = np.array([atomic_numbers[s] for s in species])
-    STATE["calc"] = polar(variable(lmp, "model"), variable(lmp, "device"), variable(lmp, "dtype"))
+    STATE["calc"] = foundation(variable(lmp, "model"), variable(lmp, "device"), variable(lmp, "dtype"))
     lmp.set_fix_external_callback(FIX_ID, callback, lmp)

@@ -7,6 +7,12 @@ source "$MP_EX/params.sh"
 if [ -n "${SYSTEM:-}" ]; then
     source "$MP_EX/../grace_sei_na/params/$SYSTEM.sh"
 fi
+case ${SYSTEM:-} in
+    graphite_*)
+        MD_MODEL=$GRAPHITE_MD_MODEL
+        REF_MODEL=$GRAPHITE_REF_MODEL
+        SELECT_MODEL=$GRAPHITE_MD_MODEL ;;
+esac
 MACE_PY=/l/zarrout1/mace-polar/venv/bin/python
 export XDG_CACHE_HOME=/l/zarrout1/mace-polar/cache
 

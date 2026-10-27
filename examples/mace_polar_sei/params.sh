@@ -18,6 +18,10 @@ MD_MODEL=${MD_MODEL:-polar-1-m}
 REF_MODEL=${REF_MODEL:-polar-1-l}         # the synthetic experiment
 MD_DTYPE=float32
 MD_D3=yes
+# Graphite systems: PolarMACE blows up on graphite within a few steps (its charge flow on an
+# extended semimetal), so their MD, experiment and selection use MACE-MH-1 instead.
+GRAPHITE_MD_MODEL=mh-1:omat_pbe
+GRAPHITE_REF_MODEL=mh-1:matpes_r2scan
 
 # 06: farthest-point selection in MACE descriptor space, per MAD temperature (N_PER_TEMP is grace_sei_na's)
 SELECT_MODEL=$MD_MODEL
@@ -52,3 +56,7 @@ EF_EPOCHS=${EF_EPOCHS:-60}
 DIPOLE_EPOCHS=${DIPOLE_EPOCHS:-20}
 DIEL_EPOCHS=${DIEL_EPOCHS:-300}
 SLAB_MD_STEPS=${SLAB_MD_STEPS:-10000}     # 10 ps at 1 fs
+
+# 15 (optional, by hand): LSC-MACE from scratch on alt's GPU (setup/make_lsc_venv.sh)
+LSC_PREFIX=/l/zarrout1/mace-scf
+LSC_HIDDEN_IRREPS="128x0e + 128x1o"

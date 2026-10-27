@@ -1,9 +1,12 @@
-"""Test-set errors of every model, bulk graphite's pressure, and which PolarMACE goes on to MD.
+"""Test-set errors of every model, graphite's pressure and MD stability, and the model that goes on to MD.
 
     python validate.py SETS_DIR MODELS_DIR OUT_DIR [DEVICE]
 
 polar_dipole is used if its periodic force RMSE is within DIPOLE_TOLERANCE of polar_ef's
-(the dipole stage trains on clusters only, without stress).
+(the dipole stage trains on clusters only, without stress). Foundation PolarMACE blows up on
+graphite, so every model also runs MD on bulk graphite and on a test frame of each graphite
+system, beside MACE-MH-1 as the baseline; if the chosen PolarMACE is not stable there, the
+slabs fall back to MH-1.
 """
 
 import json
@@ -12,7 +15,10 @@ from pathlib import Path
 
 import numpy as np
 from ase.io import read
+from ase import units
 from ase.lattice.hexagonal import Graphite
+from ase.md.langevin import Langevin
+from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
 from ase.units import GPa
 from mace.calculators import MACECalculator
 
@@ -21,6 +27,10 @@ from calc import polar, polar_d3
 POLAR_MODELS = ("foundation64", "polar_ef", "polar_dipole")
 DIPOLE_TOLERANCE = 1.10
 GRAPHITE_A, GRAPHITE_C = 2.464, 6.708   # experimental, A
+BASELINE = "mh-1:omat_pbe"
+STABILITY_STEPS = 2000                  # 1 ps at 0.5 fs
+STABILITY_TEMP = 300.0
+STABLE_MAX_FORCE = 20.0                 # eV/A; thermal forces here stay below ~5
 
 
 def rmse(a, b):
@@ -77,6 +87,42 @@ def graphite_pressure(model, device):
     return (-atoms.get_stress(voigt=False).diagonal() / GPa).round(2).tolist()
 
 
+def md_stability(atoms, model, device, seed=1):
+    """Largest force over STABILITY_STEPS of Langevin MD with D3, and whether it stayed bounded."""
+    atoms = atoms.copy()
+    atoms.info.update(charge=0, spin=1)
+    atoms.calc = polar_d3(model, device, "float32")
+    MaxwellBoltzmannDistribution(atoms, temperature_K=STABILITY_TEMP, rng=np.random.default_rng(seed))
+    dyn = Langevin(atoms, 0.5 * units.fs, temperature_K=STABILITY_TEMP, friction=0.01)
+    worst = 0.0
+    for _ in range(STABILITY_STEPS // 10):
+        dyn.run(10)
+        worst = max(worst, float(np.linalg.norm(atoms.get_forces(), axis=1).max()))
+        if not np.isfinite(worst) or worst > STABLE_MAX_FORCE:
+            break
+    return {"max_force_eV_per_A": round(worst, 2), "stable": bool(np.isfinite(worst) and worst <= STABLE_MAX_FORCE)}
+
+
+def graphite_checks(model, frames, device):
+    bulk = Graphite("C", latticeconstant={"a": GRAPHITE_A, "c": GRAPHITE_C}, size=(4, 4, 2))
+    checks = {"pressure_GPa_with_D3": graphite_pressure(model, device),
+              "bulk_md": md_stability(bulk, model, device)}
+    for name, atoms in frames.items():
+        checks[f"{name}_md"] = md_stability(atoms, model, device)
+    checks["stable"] = all(v["stable"] for k, v in checks.items() if k.endswith("_md"))
+    return checks
+
+
+def graphite_frames(periodic):
+    """One test frame of each graphite system (config_type is the system)."""
+    frames = {}
+    for atoms in periodic:
+        kind = atoms.info.get("config_type", "")
+        if kind.startswith("graphite_") and kind not in frames:
+            frames[kind] = atoms
+    return frames
+
+
 def main(sets, models, out, device="cuda"):
     sets, models, out = Path(sets), Path(models), Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -91,14 +137,20 @@ def main(sets, models, out, device="cuda"):
         calc = polar(path, device)
         report[name] = {"periodic": polar_errors(calc, periodic),
                         "clusters": polar_errors(calc, clusters),
-                        "graphite_pressure_GPa_with_D3": graphite_pressure(path, device)}
+                        "graphite": graphite_checks(path, graphite_frames(periodic), device)}
+    report["baseline_" + BASELINE] = {"graphite": graphite_checks(BASELINE, graphite_frames(periodic), device)}
     if (models / "dielectric.model").is_file():
         report["dielectric"] = {"clusters": dielectric_errors(models / "dielectric.model", clusters, device)}
     ef = report["polar_ef"]["periodic"]["F_meV_per_A"]
     dip = report.get("polar_dipole", {}).get("periodic", {}).get("F_meV_per_A", np.inf)
     report["chosen"] = "polar_dipole" if dip <= DIPOLE_TOLERANCE * ef else "polar_ef"
+    chosen = str(models / f"{report['chosen']}.model")
+    if not report[report["chosen"]]["graphite"]["stable"]:
+        print(f"{report['chosen']} is not stable on graphite: the slabs use {BASELINE}")
+        report["chosen"] = BASELINE
+        chosen = BASELINE
     (out / "validation.json").write_text(json.dumps(report, indent=2))
-    (out / "chosen_model").write_text(str(models / f"{report['chosen']}.model") + "\n")
+    (out / "chosen_model").write_text(chosen + "\n")
     print(json.dumps(report, indent=2))
 
 

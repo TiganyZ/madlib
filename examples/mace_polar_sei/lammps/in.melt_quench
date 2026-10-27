@@ -11,7 +11,10 @@ thermo_style    custom step temp pe press vol density
 thermo_modify   flush yes
 thermo          1000
 
-minimize        1.0e-6 1.0e-3 1000 10000
+# Force tolerance only: PolarMACE's total energies are ~1e5 eV, so a relative energy
+# tolerance stops a packed start after a few steps with 100+ eV/A left on it.
+min_style       fire
+minimize        0.0 0.05 5000 50000
 velocity        all create ${tmelt} ${seed} mom yes rot yes dist gaussian
 # pressures in bar
 fix             md all npt temp ${tmelt} ${tmelt} 0.05 iso 1.0 1.0 0.5

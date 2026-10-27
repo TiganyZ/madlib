@@ -1,4 +1,4 @@
-"""Farthest-point selection of MAD frames in PolarMACE descriptor space.
+"""Farthest-point selection of MAD frames in a MACE model's descriptor space (calc.foundation names).
 
     python select_fps.py POOL.pkl.gz MODEL N SEED OUT.pkl.gz
 
@@ -7,12 +7,15 @@ are far apart when some element's environments differ.
 """
 
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from mace.calculators import mace_polar
 from mace.modules.utils import extract_invariant
 from mace.tools import torch_tools
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from calc import foundation  # noqa: E402
 
 # After mace, which lets e3nn's constants load under torch's weights_only default.
 from e3nn import o3  # noqa: E402
@@ -53,7 +56,7 @@ def farthest_points(x, n, rng):
 
 def main(pool, model, n, seed, out):
     df = pd.read_pickle(pool, compression="gzip")
-    calc = mace_polar(model=model, device="cuda", default_dtype="float64")
+    calc = foundation(model, "cuda", "float64")
     elements = sorted({z for a in df["ase_atoms"] for z in a.numbers})
     x = np.array([frame_vector(calc, a, elements) for a in df["ase_atoms"]])
     keep = farthest_points(x, int(n), np.random.default_rng(int(seed)))
