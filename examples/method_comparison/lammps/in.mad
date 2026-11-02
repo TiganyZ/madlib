@@ -1,0 +1,54 @@
+# MAD: a melt-quench with the bias ramped in, one run per gamma.
+#
+# Variables: target, species, gamma, steps, minimise, temp_anneal, temp_final,
+# rmax, nbins, kde, comm, qmin, qmax, nq, output, weighting, seed.
+# The potential is included from potential.lmp so every method here uses the
+# same two lines.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+atom_modify     map yes
+
+read_data       start.data nocoeff
+mass            * ${mass}
+comm_modify     cutoff ${comm}
+neighbor        0.5 bin
+include         potential.lmp
+
+# c_pepair is the potential alone. fix mad/* sets thermo_energy on by default,
+# so pe carries the bias and is not an energy axis any front can use.
+compute         pepair all pe pair
+compute         gr all mad/pdf r 0.1 ${rmax} ${nbins} kde ${kde}
+
+timestep        ${timestep}
+velocity        all create ${temp_anneal} ${seed} mom yes rot yes dist gaussian
+fix             nve all nve
+
+# Melt unbiased: the liquid should be the potential's own, not the target's.
+fix             mad all mad/xrd c_gr target ${target} &
+                q ${qmin} ${qmax} ${nq} output ${output} species ${species} &
+                weighting ${weighting} gamma 0.0
+thermo_style    custom step temp c_pepair f_mad f_mad[2] f_mad[3] press
+thermo_modify   format float %.8g flush yes
+thermo          200
+
+fix             thm all langevin ${temp_anneal} ${temp_anneal} 0.1 ${seed}
+run             ${melt}
+unfix           thm
+unfix           mad
+
+# Quench with the bias ramping in, so the experiment steers the structure
+# while it is still mobile rather than fighting an already-frozen one.
+fix             mad all mad/xrd c_gr target ${target} &
+                q ${qmin} ${qmax} ${nq} output ${output} species ${species} &
+                weighting ${weighting} gamma 0.0 ${gamma}
+fix             thm all langevin ${temp_anneal} ${temp_final} 0.1 ${seed}
+run             ${steps}
+unfix           thm
+unfix           nve
+
+min_style       fire
+minimize        1e-8 1e-4 ${minimise} ${minimise}
+
+write_data      final.data

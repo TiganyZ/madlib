@@ -1,0 +1,42 @@
+# HRMC: Metropolis on the potential and the misfit together.
+#
+# The difference from plain RMC is that the potential is in the acceptance
+# criterion rather than absent, so a move must pay for itself physically as
+# well as fit the data better.
+#
+# fix_modify mad energy yes is what puts the misfit into the energy fix gcmc
+# tests. With a real potential present the temperature must be a real
+# temperature -- the kT = 1 eV that maps plain RMC onto exp(-dchi2/2) would
+# make the potential term meaningless.
+#
+# full_energy re-evaluates the whole cell per attempted move, so the cost of a
+# chain is its move count: cycles * moves_per_cycle.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+atom_modify     map yes
+
+read_data       start.data nocoeff
+mass            * ${mass}
+comm_modify     cutoff ${comm}
+neighbor        0.5 bin
+include         potential.lmp
+
+compute         pepair all pe pair
+compute         gr all mad/pdf r 0.1 ${rmax} ${nbins} kde ${kde}
+fix             mad all mad/xrd c_gr target ${target} &
+                q ${qmin} ${qmax} ${nq} output ${output} species ${species} &
+                weighting ${weighting} gamma ${gamma}
+fix_modify      mad energy yes
+
+# nexchanges 0: displacement-only Metropolis, no insertions or deletions, so
+# the composition is fixed and energy per atom stays comparable.
+fix             mc all gcmc 1 0 ${moves} 1 ${seed} ${temp} 0.0 ${maxdisp} full_energy
+
+thermo_style    custom step pe c_pepair f_mad f_mad[2] f_mad[3] f_mc[1] f_mc[2]
+thermo_modify   format float %.8g flush yes
+thermo          25
+
+run             ${cycles}
+write_data      final.data
