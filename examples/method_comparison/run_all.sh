@@ -79,7 +79,11 @@ run_hrmc() {
 }
 
 run_ezga() {
-  local kind=$1 out=$OUT/ezga_${kind//+/_}
+  # Two statements, not one: bash expands every argument to `local` before it
+  # assigns any of them, so ${kind} on the same line is expanded in the
+  # caller's scope where it does not exist -- and set -u then aborts.
+  local kind=$1
+  local out=$OUT/ezga_${kind//+/_}
   local t0=$SECONDS
   "$PY" "$HERE/run_ga.py" --out "$out" --population "$DATA/population.xyz" \
       --data-dir "$DATA" --lmp "$LMP" --target "$TARGET" --objectives "$kind" \
@@ -87,7 +91,8 @@ run_ezga() {
       --md-steps "$EZGA_MD_STEPS" --relax-steps "$EZGA_RELAX_STEPS" \
       --gammas "$(echo "$GAMMAS" | tr ' ' ',')" --species "$SPECIES" \
       --rmax "$RMAX" --nbins "$NBINS" --qmin "$QMIN" --qmax "$QMAX" --nq "$NQ" \
-      --xrd-output "$OUTPUT" --weighting "$WEIGHTING" --seed "$SEED"
+      --xrd-output "$OUTPUT" --weighting "$WEIGHTING" --seed "$SEED" \
+      --ranks "$RANKS"
   timing "ezga_${kind//+/_}" all "$((SECONDS - t0))" \
          "$((EZGA_GENERATIONS * EZGA_POPULATION * (EZGA_MD_STEPS + EZGA_RELAX_STEPS)))"
 }
