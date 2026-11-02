@@ -303,10 +303,18 @@ void PairTurboGAPKokkos<DeviceType>::add_2b_and_core(int ns, int np, int nall)
   {
     auto me = Kokkos::create_mirror_view(d_energies);
     auto mf = Kokkos::create_mirror_view(d_forces);
+    auto mv = Kokkos::create_mirror_view(d_virial);
     Kokkos::deep_copy(me, d_energies);
     Kokkos::deep_copy(mf, d_forces);
+    Kokkos::deep_copy(mv, d_virial);
     for (int s = 0; s < ns; s++) site_energy[s] += me(s);
     for (int a = 0; a < 3 * nall; a++) site_force[a] += mf(a);
+    // virial_term too, not just the energies and forces. The kernels above
+    // already accumulate into d_virial; leaving it on the device meant
+    // tally_term_virial added nothing for 2b and core_pot, so turbogap/kk
+    // kept reporting the pre-12e73ae pressure (-85.7 GPa on diamond at its
+    // equilibrium lattice constant, against +2.1 from the host style).
+    for (int k = 0; k < 9; k++) virial_term[k] += mv(k);
   }
 
   (void) np;
