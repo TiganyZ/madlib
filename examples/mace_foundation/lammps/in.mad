@@ -1,0 +1,42 @@
+# A MACE foundation model under an experimental bias.
+#
+# Variables: model, species, target, gamma, temp. Optional: seed, steps.
+
+variable        seed    index 12345
+variable        steps   index 20000
+
+units           metal
+atom_style      atomic
+boundary        p p p
+# symmetrix/mace needs an atom map; harmless for every other pair style.
+atom_modify     map yes
+newton          on
+
+read_data       start.data
+
+# The ghost cutoff compute mad/pdf needs: r_max + 8*kde + skin. It must stay
+# below half the box, or the pair distribution counts the cell's own images.
+comm_modify     cutoff 7.3
+neighbor        0.5 bin
+
+pair_style      symmetrix/mace
+pair_coeff      * * ${model} ${species}
+
+# The potential alone, kept separate from the biased energy below.
+compute         pepair all pe pair
+
+compute         gr all mad/pdf r 0.1 6.0 151 kde 0.1
+fix             xrd all mad/xrd c_gr target ${target} q 1.0 10.0 181 output qFq &
+                species ${species} gamma ${gamma} file xrd.dat write_every 1000
+
+timestep        0.001
+velocity        all create ${temp} ${seed} mom yes rot yes dist gaussian
+fix             md all nvt temp ${temp} ${temp} 0.1
+
+# c_pepair, not pe: pe carries the bias because fix mad/* sets thermo_energy.
+thermo_style    custom step temp c_pepair f_xrd f_xrd[2] f_xrd[3] press
+thermo_modify   flush yes
+thermo          200
+
+run             ${steps}
+write_data      final.data
