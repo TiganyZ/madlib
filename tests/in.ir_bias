@@ -1,0 +1,30 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# A biased IR run on the polar dimers, which straddle rank boundaries on
+# purpose. The target is synthetic: what is under test is the mechanics of
+# the bias -- that every rank agrees on whether to apply it, that the adjoint
+# completes its reverse communication, and that the force is actually felt --
+# not whether these dimers look like anything measured.
+units           metal
+atom_style      full
+boundary        p p p
+read_data       data/dimers_split.data
+pair_style      lj/cut 8.0
+pair_coeff      * * 0.01 3.0
+bond_style      harmonic
+bond_coeff      1 25.0 1.13
+special_bonds   lj 0.0 1.0 1.0
+
+velocity        all create 300.0 8712 mom yes
+fix             nve all nve
+fix             t   all langevin 300.0 300.0 0.5 4871
+
+compute mu all mad/property/dipole charges 0.5 -0.5
+fix     ir all mad/ir 2 c_mu nu_max 2000 acf_ratio 0.2 smooth 1 gaussian &
+        correlate rate qc none &
+        target ${target} fit yes yes fit_range 200 1900 &
+        gamma ${gamma} warmup 200 bias_every 50
+
+thermo          1000
+thermo_style    custom step temp pe f_ir[6] f_ir[10] f_ir[11]
+run             1000

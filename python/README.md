@@ -24,16 +24,9 @@ The energy axis is EZGA's own `objective_energy()`, or
 
 ## Relaxing the cell
 
-`madlib_runner(box_relax="iso")` lets each individual relax its cell as well
-as its positions, under `E_pot + bias`. Worth doing here because the two
-objectives disagree about density -- for glassy carbon the GAP energy
-minimises at 1.50 g/cm3 and the Zeng pattern at 1.41 -- so density is a real
-axis of the front, and a gamma ladder then spreads individuals along it by
-construction rather than by waiting for a strain mutation to land.
-
-This needs a correct virial, which `pair_style turbogap` did not have until
-the 2b and core_pot terms stopped going through `f.r`; see the `pairvirial`
-test leg.
+`madlib_runner(box_relax="iso")` lets each individual relax its cell as well as
+its positions, under `E_pot + bias`. Use it when the energy and the experiment
+prefer different densities, so that density becomes an axis of the front.
 
 ## Two things that are easy to get wrong
 

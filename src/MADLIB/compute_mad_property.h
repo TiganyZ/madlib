@@ -59,6 +59,13 @@ class ComputeMADProperty : public Compute {
   // virial[6]; each rank contributes its own share.
   virtual void adjoint(double **lambda, double *virial) = 0;
 
+  // Whether adjoint() needs what the forward pass left behind. A model that
+  // contracts a stored descriptor does, and a caller biasing every step has
+  // to run compute_property() first. One built from charges and positions
+  // does not, and running it anyway is not free: the molecular dipole
+  // rebuilds an anchor map over every ghost each time it is called.
+  virtual bool adjoint_needs_forward() const { return true; }
+
   double *scalar_property() { return vector_atom; }
   double **vector_property() { return array_atom; }
 

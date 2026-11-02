@@ -17,6 +17,7 @@
 
 #include "mad_ir_spectrum.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 
@@ -209,6 +210,33 @@ static int smooth_box(const std::vector<double> &x, int k, std::vector<double> &
 
 /* ---------------------------------------------------------------------- */
 
+// What is actually correlated. The backward difference costs one frame and a
+// constant factor; the factor matters only to the absolute units, which a
+// fitted scale absorbs. Shared by the spectrum and its gradient so the two
+// cannot disagree about which series they are talking about.
+static bool apply_correlate(const MADIrConfig &cfg, const double *&mu, int &n_frames,
+                            std::vector<double> &rate, std::string &err)
+{
+  if (cfg.correlate == "dipole") return true;
+  if (cfg.correlate != "rate") {
+    err = "MADLIB: ir correlate must be dipole or rate, not " + cfg.correlate;
+    return false;
+  }
+  if (n_frames < 2) {
+    err = "MADLIB: correlate rate needs at least two stored frames";
+    return false;
+  }
+  rate.resize(3 * (n_frames - 1));
+  for (int t = 1; t < n_frames; t++)
+    for (int d = 0; d < 3; d++)
+      rate[3 * (t - 1) + d] = (mu[3 * t + d] - mu[3 * (t - 1) + d]) / cfg.dt_fs;
+  mu = rate.data();
+  n_frames -= 1;
+  return true;
+}
+
+/* ---------------------------------------------------------------------- */
+
 bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfig &cfg,
                                 MADIrResult &res, std::string &err)
 {
@@ -225,6 +253,9 @@ bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfi
     err = "MADLIB: ir acf_ratio must be in (0, 1]";
     return false;
   }
+
+  std::vector<double> rate;
+  if (!apply_correlate(cfg, mu, n_frames, rate, err)) return false;
 
   int L = (int) (n_frames * cfg.acf_ratio);
   if (L < 1) L = 1;
@@ -327,4 +358,116 @@ bool LAMMPS_NS::mad_ir_spectrum(const double *mu, int n_frames, const MADIrConfi
     for (auto &v : res.power) v /= peakp;
 
   return true;
+}
+
+/* ---------------------------------------------------------------------- */
+
+bool LAMMPS_NS::mad_ir_acf_gradient(const MADIrConfig &cfg, const MADIrResult &res,
+                                    const double *dLdI, std::vector<double> &acf_grad,
+                                    std::string &err)
+{
+  err.clear();
+  if (cfg.smooth_k > 1) {
+    err =
+        "MADLIB: an IR bias needs smooth 1. Smoothing is a second linear map and its "
+        "transpose is not applied here; the lag window already sets the resolution, so "
+        "smoothing on top of it is weighting the same thing twice";
+    return false;
+  }
+
+  const int L = res.n_lag, nf = res.n_freq;
+  if (L < 1 || nf < 1) {
+    err = "MADLIB: no spectrum to take a gradient of yet";
+    return false;
+  }
+  const int N2 = 2 * L - 1;
+
+  std::vector<double> pref;
+  if (!prefactor(cfg.quantum_correction, cfg.temperature, res.freq, pref, err)) return false;
+
+  std::vector<double> w;
+  lag_window(cfg.window, L, w);
+
+  // The transpose of the forward transform: I_k = pref_k sum_tau a(tau)
+  // cos(theta_k tau) with a(0) = C(0)w(0) and a(tau) = 2C(tau)w(tau), so
+  // dI_k/dC(tau) carries the same window and the same factor of two back.
+  acf_grad.assign(L, 0.0);
+  for (int t = 0; t < L; t++) {
+    double acc = 0.0;
+    for (int k = 0; k < nf; k++) {
+      if (dLdI[k] == 0.0) continue;
+      acc += dLdI[k] * pref[k] * cos(2.0 * M_PI * k * t / (double) N2);
+    }
+    acf_grad[t] = (t == 0 ? 1.0 : 2.0) * w[t] * acc;
+  }
+  return true;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void LAMMPS_NS::mad_ir_series_mean(const double *mu, int n_frames, const MADIrConfig &cfg,
+                                   double mean[3])
+{
+  mean[0] = mean[1] = mean[2] = 0.0;
+  if (!cfg.subtract_mean) return;
+
+  if (cfg.correlate == "rate") {
+    // sum of (mu(t+1) - mu(t)) telescopes to the endpoints.
+    if (n_frames < 2) return;
+    const double s = 1.0 / ((double) (n_frames - 1) * cfg.dt_fs);
+    for (int d = 0; d < 3; d++) mean[d] = (mu[3 * (n_frames - 1) + d] - mu[d]) * s;
+    return;
+  }
+  if (n_frames < 1) return;
+  for (int t = 0; t < n_frames; t++)
+    for (int d = 0; d < 3; d++) mean[d] += mu[3 * t + d];
+  for (int d = 0; d < 3; d++) mean[d] /= (double) n_frames;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void LAMMPS_NS::mad_ir_newest_gradient(const double *mu, int n_frames, const MADIrConfig &cfg,
+                                       const double mean[3], const std::vector<double> &acf_grad,
+                                       double dLdmu[3])
+{
+  dLdmu[0] = dLdmu[1] = dLdmu[2] = 0.0;
+  const bool rate = (cfg.correlate == "rate");
+  const int M = rate ? n_frames - 1 : n_frames;
+  const int L = std::min((int) acf_grad.size(), M);
+  if (M < 2 || L < 1) return;
+
+  // The correlated series, read rather than built.
+  auto dev = [&](int t, int d) {
+    const double v =
+        rate ? (mu[3 * (t + 1) + d] - mu[3 * t + d]) / cfg.dt_fs : mu[3 * t + d];
+    return v - mean[d];
+  };
+
+  // C(tau) = (1/M) sum_a d(a).d(a+tau), so the newest frame enters twice at
+  // tau = 0 and once at every other lag -- and also through <mu>, which
+  // depends on it. That second route contributes partial sums of d at both
+  // ends of the buffer; because the whole series sums to zero each is a sum
+  // over at most L terms, so carrying it exactly costs O(L) and the gradient
+  // is finite-difference exact instead of right to O(M^-1/2).
+  std::vector<double> front(3 * L, 0.0), back(3 * L, 0.0);
+  if (cfg.subtract_mean)
+    for (int t = 1; t < L; t++)
+      for (int d = 0; d < 3; d++) {
+        front[3 * t + d] = front[3 * (t - 1) + d] + dev(t - 1, d);
+        back[3 * t + d] = back[3 * (t - 1) + d] + dev(M - t, d);
+      }
+
+  const double invM = 1.0 / (double) M;
+  for (int d = 0; d < 3; d++) {
+    double acc = 2.0 * acf_grad[0] * dev(M - 1, d) * invM;
+    for (int t = 1; t < L; t++)
+      acc += acf_grad[t] *
+          (dev(M - 1 - t, d) * invM + (front[3 * t + d] + back[3 * t + d]) * invM * invM);
+    dLdmu[d] = acc;
+  }
+
+  // One more link when the rate was correlated: eta = (mu - mu_prev)/dt, and
+  // mu_prev is part of the frozen past.
+  if (rate)
+    for (int d = 0; d < 3; d++) dLdmu[d] /= cfg.dt_fs;
 }

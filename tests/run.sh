@@ -160,7 +160,7 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir dipolemodel quip torch mliap nmr}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir irgradient irbias dipolemodel quip torch mliap nmr}
 
 for w in $want; do
 case $w in
@@ -391,6 +391,69 @@ sys.exit(0 if r1 < 0.5 * r0 else 1)
 PY
     if [ $? -eq 0 ]; then ok "the bias closes the gap on a real potential"
     else bad "the bias did not improve the fit"; fi
+  fi
+  ;;
+
+irbias)
+  leg "the IR bias runs, is felt, and agrees across rank counts"
+  IRT=/tmp/mad_ir_target.dat
+  awk 'BEGIN{for(nu=100;nu<=2000;nu+=20)
+         printf "%.6f %.6f\n", nu, exp(-((nu-700)/180)^2)+0.4*exp(-((nu-1400)/120)^2)}' > $IRT
+
+  # gamma = 0 and gamma > 0 through the same deck. If the bias were not
+  # reaching the forces the two would agree, which is the failure a run that
+  # merely completes would not show.
+  for g in 0.0 2.0; do
+    $LMP -in in.ir_bias -var target $IRT -var gamma $g -log /tmp/mad_irbias_$g.log \
+        >/dev/null 2>&1
+  done
+  a=$(grep -E '^ +1000 ' /tmp/mad_irbias_0.0.log | tail -1 | awk '{print $3}')
+  b=$(grep -E '^ +1000 ' /tmp/mad_irbias_2.0.log | tail -1 | awk '{print $3}')
+  if [ -z "$a" ] || [ -z "$b" ]; then
+    bad "a biased IR run did not finish"
+  elif [ "$a" = "$b" ]; then
+    bad "gamma 2.0 gave the same energy as gamma 0.0, so the bias reached nothing"
+  else
+    ok "the bias changes the trajectory ($a -> $b eV)"
+  fi
+
+  # The deadlock this catches was one rank reading an uninitialised multiplier
+  # as nonzero and entering the adjoint's reverse communication while the
+  # other read zero and returned. It only ever appeared above one rank.
+  if command -v mpirun >/dev/null; then
+    for np in 2 4; do
+      if timeout 120 mpirun -np $np $LMP -in in.ir_bias -var target $IRT -var gamma 2.0 \
+             -log /tmp/mad_irbias_np$np.log >/dev/null 2>&1; then
+        ok "a biased run completes on $np ranks"
+      else
+        bad "a biased run hung or failed on $np ranks"
+      fi
+    done
+  fi
+  ;;
+
+irgradient)
+  leg "the frozen-past IR gradient against a finite difference of its own loss"
+  MADGRAD=/tmp/mad_ir_gradient
+  g++ -O2 -std=c++17 -o $MADGRAD test_ir_gradient.cpp ../src/MADLIB/mad_ir_spectrum.cpp -lm \
+      2>/tmp/mad_irgrad_build.log
+  if [ ! -x $MADGRAD ]; then
+    sed 's/^/     /' /tmp/mad_irgrad_build.log | head -10
+    bad "could not build the IR gradient driver"
+  else
+    # Both correlators and both ends of the weighting, because the chain
+    # differs in each: "rate" adds the backward difference and "classical"
+    # puts a nu^2 between dL/dI and dL/dC.
+    for pair in "rate none" "dipole classical" "rate classical" "dipole none"; do
+      set -- $pair
+      out=$($MADGRAD data/ir_dipoles.dat 1.0 hann 0.25 4000 "$2" "$1" 1e-3 1e-6 2>&1)
+      if [ $? -eq 0 ]; then
+        ok "correlate $1, qc $2: $(echo "$out" | tail -1 | sed 's/^# //')"
+      else
+        echo "$out" | sed 's/^/     /'
+        bad "correlate $1, qc $2: the gradient disagrees with finite differences"
+      fi
+    done
   fi
   ;;
 
