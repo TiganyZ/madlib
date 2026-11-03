@@ -5,20 +5,27 @@
 Not the legendary rap producer, but an efficient Molecular Augmented Dynamics
 library for experimental atomistic structure inference for use with LAMMPS.
 
-It makes a simulation agree with a measurement. MADlib predicts an observable —
-a diffraction pattern, a pair distribution function, an XPS, NMR or IR spectrum
-— from the atoms as they are right now, compares it with your data, and pushes
-the atoms towards agreement. It works with any LAMMPS potential.
+This library allows you to perform experimental structure inference (optimizing
+a structure according to experimental data and its potential energy) primarily
+through a Molecular Dynamics driven optimization, Molecular Augmented Dynamics
+(MAD), which far outstrips other methods for such inference (such as Hybrid
+Reverse Monte-Carlo) in terms of scalability and speed. The underlying
+interatomic potential can by any LAMMPS potential. 
+
+MADlib predicts the observable through TurboGAP — a diffraction pattern, a pair
+distribution function, an XPS or NMR spectrum — from the given atom positions
+at that step, compares it with the input experimental data, and optimizes the
+potential energy and experimental agreement. 
 
 ---
 
-## The idea
+## Theory
 
 An ordinary MD run follows the forces of a potential. MADlib adds one more
 term to the energy: a penalty for disagreeing with the experiment.
 
 $$
-V_\text{tot} \;=\; V_\text{pot} \;+\; \frac{\gamma}{2} \sum_i w_i
+V_\text{tot} = V_\text{pot} + \frac{\gamma}{2} \sum_i w_i
 \left( y_i(\mathbf{r}) - y^\text{exp}_i \right)^2
 $$
 
@@ -31,8 +38,7 @@ $$
 Because $y_i(\mathbf{r})$ is differentiable, the penalty has a force:
 
 $$
-\mathbf{F}_j \;=\; -\nabla_j V_\text{pot}
-\;-\; \gamma \sum_i w_i \left( y_i - y^\text{exp}_i \right)
+\mathbf{F}_j = -\nabla_j V_\text{pot} - \gamma \sum_i w_i \left( y_i - y^\text{exp}_i \right)
 \frac{\partial y_i}{\partial \mathbf{r}_j}
 $$
 
@@ -55,16 +61,16 @@ sit at their own optimum, so the force picks up no extra term.
 ### The Dissimilarity
 
 $$
-D \;=\; \sum_i w_i \left( y_i - y^\text{exp}_i \right)^2
+D = \sum_i w_i \left( y_i - y^\text{exp}_i \right)^2
 \qquad\qquad
-\text{rel\_error} \;=\; \sqrt{\frac{D}{\sum_i w_i \left(y^\text{exp}_i\right)^2}}
+\text{rel\_error} = \sqrt{\frac{D}{\sum_i w_i \left(y^\text{exp}_i\right)^2}}
 $$
 
 $D$ is the **dissimilarity** and $E_\text{bias} = \tfrac{1}{2}\gamma D$.
 `rel_error` is dimensionless — 0 is a perfect fit — and is the number to
 follow during a run.
 
-### How to choose $\gamma$
+### Choosing the energy scale for experimental agreement ($\gamma$)
 
 1. Run once with `gamma 0.0`. Nothing is biased; read $D$ from `f_mad[3]`.
 2. Pick $\gamma$ so that $\tfrac{1}{2}\gamma D$ is a **small fraction of the
