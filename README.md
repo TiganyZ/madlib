@@ -29,11 +29,10 @@ V_\text{tot} = V_\text{pot} + \frac{\gamma}{2} \sum_i w_i
 \left( y_i(\mathbf{r}) - y^\text{exp}_i \right)^2
 $$
 
-- $y_i(\mathbf{r})$ — the observable **predicted** from the current positions, on grid point $i$
+- $y_i(\mathbf{r})$ — the observable **predicted** from the current positions, on discretized point $i$
 - $y^\text{exp}_i$ — your **measured** value at the same point
-- $w_i$ — grid weights (trapezoidal, normalised to mean one, so $\gamma$ means
-  the same thing whatever grid your data came on)
-- $\gamma$ — how hard the data pulls
+- $w_i$ — weights if specified for the particular experimental point (so one can focus on optimizing particular regions of a spectrum) 
+- $\gamma$ — how important the experimental agreement is in comparison to the interatomic potential. 
 
 Because $y_i(\mathbf{r})$ is differentiable, the penalty has a force:
 
@@ -43,16 +42,12 @@ $$
 $$
 
 The second term allows for gradient-based optimization of the structure with
-respect to experimental data. 
-
-Then running MD (through say an annealing protocol) will provide a
+respect to experimental data. Running MD/MC (at high temperature) will then provide a
 multi-objective optimization of both the potential energy and experimental
-agreement.  
-
-The potential keeps the structure physical; the
+agreement.  The potential keeps the structure physical; the
 experimental data funnels the structure search to areas of experimental agreement. 
 
-Ran as MD and it is *molecular augmented dynamics*; ran using the energy+exp disagreement and it is Hybrid Reverse Monte Carlo (HRMC).
+Ran as MD and it is *molecular augmented dynamics*; ran using the Energy+Exp disagreement and it is Hybrid Reverse Monte Carlo (HRMC).
 
 When the prediction is in arbitrary units, `fit yes` fits a scale $s$ and
 baseline $b$ by weighted least squares and compares $s y_i + b$ instead. Both
@@ -60,11 +55,7 @@ sit at their own optimum, so the force picks up no extra term.
 
 ### The Dissimilarity
 
-$$
-D = \sum_i w_i \left( y_i - y^\text{exp}_i \right)^2
-\qquad\qquad
-\text{rel\_error} = \sqrt{\frac{D}{\sum_i w_i \left(y^\text{exp}_i\right)^2}}
-$$
+$$ D = \sum_i w_i \left( y_i - y^\text{exp}_i \right)^2 \qquad\qquad \text{rel\_error} = \sqrt{\frac{D}{\sum_i w_i \left(y^\text{exp}_i\right)^2}} $$
 
 $D$ is the **dissimilarity** and $E_\text{bias} = \tfrac{1}{2}\gamma D$.
 `rel_error` is dimensionless — 0 is a perfect fit — and is the number to
@@ -79,7 +70,7 @@ follow during a run.
    switches on without kicking the structure at step 0.
 
 > A $\gamma$ too large by orders of magnitude pulls the structure apart *while
-> the reported mismatch falls* (the potential imparts nothing to the optimization).
+> the reported mismatch falls* (the potential imparts nothing in terms of the optimization).
 
 ---
 
