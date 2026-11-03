@@ -55,7 +55,7 @@ sit at their own optimum, so the force picks up no extra term.
 
 ### The Dissimilarity
 
-$$ D = \sum_i w_i \left( y_i - y^\text{exp}_i \right)^2 \qquad\qquad \text{rel\_error} = \sqrt{\frac{D}{\sum_i w_i \left(y^\text{exp}_i\right)^2}} $$
+$$ D = \sum_i w_i \left( y_i - y^{\text{exp}}_i \right)^2 \qquad\qquad \text{rel error} = \sqrt{\frac{D}{\sum_i w_i \left(y^{\text{exp}}_i\right)^2}} $$
 
 $D$ is the **dissimilarity** and $E_\text{bias} = \tfrac{1}{2}\gamma D$.
 `rel_error` is dimensionless — 0 is a perfect fit — and is the number to
