@@ -6,9 +6,9 @@ exactly how the previous set drifted without anyone noticing.
 
 | | |
 |---|---|
-| vendored on | 2026-09-12T09:10:30Z |
-| turbogap | `84d503b9184d62da02575d2f28e0b8f064fbf4a8` |
-| turbogap subject | Merge feature/kokkos-backend: a second device backend, behind KOKKOS=1 |
+| vendored on | 2026-09-23T12:27:56Z |
+| turbogap | `45b49a9d0074a28ca9c29cd8c7fe16cbd93a2cc3` |
+| turbogap subject | removed extraneous gpu fixes |
 | soap_turbo | `55ce9a95f3eaf5e386c2a74d977207ce3067f3a4` |
 | soap_turbo subject | TURBOGAP_DUMP_RADIAL: do not index the derivative dummy |
 
@@ -20,8 +20,8 @@ exactly how the previous set drifted without anyone noticing.
 | `elements.f90` | `src/` | `2e130fad2fb85ac0` |
 | `topology.f90` | `src/` | `d01b718480cdfe51` |
 | `splines.f90` | `src/` | `8b70bee192c7e592` |
-| `types.f90` | `src/` | `f4e8dc5cf5df47f9` |
-| `local_properties.f90` | `src/` | `8b13cceb9ec5cc6a` |
+| `types.f90` | `src/` | `6452dc3ab69cb34a` |
+| `local_properties.f90` | `src/` | `a887581009a8e62a` |
 | `gap.f90` | `src/` | `9fa54e003ae52062` |
 | `soap_turbo_functions.f90` | `src/soap_turbo/src/` | `334e78ae7cd9638b` |
 | `soap_turbo_radial.f90` | `src/soap_turbo/src/` | `5d90602ce7e5f8e1` |
