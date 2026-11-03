@@ -28,14 +28,25 @@ The energy axis is EZGA's own `objective_energy()`, or
 its positions, under `E_pot + bias`. Use it when the energy and the experiment
 prefer different densities, so that density becomes an axis of the front.
 
-## Two things that are easy to get wrong
+## Things that are easy to get wrong
 
 - **Report `c_pepair`, never `pe`.** `fix mad/*` sets `thermo_energy` on by
   default, unlike most LAMMPS fixes, so `pe` silently contains the bias. An
   energy axis contaminated by the bias makes the front meaningless.
 - **Vary gamma across the population.** One gamma pulls every individual to
   the same corner of the plane. `madlib_runner` takes a `gamma_ladder` and
-  deals from it in turn, so the population spans the front.
+  picks from it by the parent's hash, so the population spans the front and
+  siblings share a bias strength. It cannot be inherited: EZGA passes the
+  calculator the parent's hash but not the parent's metadata.
+- **`selection_method` is `"nondominated_sorted"`.** `pareto_rank` is the
+  selector's own internal name for the same thing and is *not* an accepted
+  config value -- the `SelectionMethod` enum rejects it before the selector
+  sees it.
+- **Probe your variation operators before trusting a run.** EZGA's collision
+  gate sits between the mutation and the relaxation, so a child that clashes is
+  discarded before LAMMPS can repair it, and an operator whose children always
+  clash is silently dead rather than an error. See the GA traps in
+  [`examples/method_comparison`](../examples/method_comparison/README.md).
 
 ## Use
 
@@ -55,7 +66,7 @@ runner = madlib_runner(
 config = load_config({
     "evaluator": {"objectives_funcs": [objective_energy_per_atom(),
                                        objective_xrd_rel_error()]},
-    "multiobjective": {"selection_method": "pareto_rank"},
+    "multiobjective": {"selection_method": "nondominated_sorted"},
     "simulator": {"calculator": runner},
     ...
 })
@@ -64,6 +75,10 @@ build_default_engine(config).run()
 
 Afterwards, `front.write_front(db_path, out_dir)` reconstructs the front from
 the SAGE database: EZGA keeps every structure but writes no front of its own.
+
+[`examples/method_comparison`](../examples/method_comparison/README.md) has the
+install, a complete runnable config with the measured operator settings, and
+the traps worth reading before a long run.
 
 ## Layout
 
@@ -74,6 +89,7 @@ the SAGE database: EZGA keeps every structure but writes no front of its own.
 | `runner.py` | the EZGA calculator |
 | `objectives.py` | the EZGA objectives |
 | `front.py` | non-dominated sort over a finished run |
+| `constraints.py` | atom-level constraints for the variation operators |
 | `tests/test_madlib_ezga.py` | everything that needs no LAMMPS: deck text, log parsing, objectives, front, coordination |
 | `tests/test_roundtrip.py` | against a real LAMMPS: round trip through the dump, triclinic cells, and that the reported energy is the potential alone |
 

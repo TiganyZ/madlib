@@ -3,8 +3,9 @@
 import sys
 import numpy as np
 
-from madlib_ezga import deck, features, front, objectives
+from madlib_ezga import constraints, deck, features, front, objectives
 from madlib_ezga.lammps_run import parse_thermo
+from madlib_ezga.runner import _gamma_for
 
 FAILURES = []
 
@@ -123,8 +124,43 @@ def test_coordination():
     check("bond across the boundary counts", abs(cn_p - 1.0) < 1e-9, cn_p)
 
 
+def test_random_subset():
+    """A rattle of every atom cannot pass a minimum-distance gate in a dense
+    cell, so the operators move a subset. The subset has to be re-drawn per
+    call, or every child rattles the same atoms for the whole run."""
+    n = 4000
+    pick = constraints.random_subset(0.02, seed=0)
+    first = [pick(i, None) for i in range(n)]
+    second = [pick(i, None) for i in range(n)]
+    share = sum(first) / n
+    check("subset is about the asked fraction", abs(share - 0.02) < 0.005, share)
+    check("subset is re-drawn per call", first != second)
+    check("subset is a bool", all(isinstance(v, bool) for v in first[:50]))
+
+    none_pass = constraints.random_subset(0.0, seed=0)
+    check("zero fraction picks nothing", not any(none_pass(i, None) for i in range(100)))
+
+
+def test_gamma_for():
+    """Siblings share a gamma; without that a family is split across the ladder
+    by arrival order, which undoes in the child what the parent gained."""
+    ladder = (1.0, 3.0, 10.0, 30.0, 100.0)
+    fallback = iter([-1.0] * 10)
+
+    a = _gamma_for("hash-a", ladder, fallback)
+    check("same parent, same gamma", _gamma_for("hash-a", ladder, fallback) == a)
+    check("gamma is on the ladder", a in ladder, a)
+
+    seen = {_gamma_for(f"hash-{i}", ladder, fallback) for i in range(200)}
+    check("different parents span the ladder", seen == set(ladder), sorted(seen))
+
+    # No parent means no family to agree with, so the ladder is dealt in turn.
+    check("no parent falls back", _gamma_for(None, ladder, iter([7.0])) == 7.0)
+
+
 for test in [test_pdf_cutoffs, test_deck_text, test_parse_thermo,
-             test_objectives, test_front, test_coordination]:
+             test_objectives, test_front, test_coordination,
+             test_random_subset, test_gamma_for]:
     print(test.__name__)
     test()
 

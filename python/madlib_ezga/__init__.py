@@ -8,6 +8,7 @@ Nothing here is registered with EZGA. Its config loader resolves
 an ordinary import.
 """
 
+from .constraints import random_subset
 from .deck import Pdf, Potential, Xrd, render
 from .features import feature_mean_coordination, feature_sp_fractions
 from .front import non_dominated, write_front
@@ -19,6 +20,7 @@ __all__ = [
     "Potential",
     "Xrd",
     "render",
+    "random_subset",
     "feature_mean_coordination",
     "feature_sp_fractions",
     "madlib_runner",
