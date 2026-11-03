@@ -3,7 +3,7 @@
 import sys
 import numpy as np
 
-from madlib_ezga import constraints, deck, features, front, objectives
+from madlib_ezga import constraints, deck, features, front, mutations, objectives
 from madlib_ezga.lammps_run import parse_thermo
 from madlib_ezga.runner import _gamma_for
 
@@ -141,6 +141,47 @@ def test_random_subset():
     check("zero fraction picks nothing", not any(none_pass(i, None) for i in range(100)))
 
 
+def test_isotropic_strain():
+    """Density moves, shape does not. EZGA's own strain shears the cell
+    triclinic, which narrows the distance between opposite faces -- the
+    quantity compute mad/pdf is limited by -- and the lattice-vector lengths
+    stop reporting it."""
+    class Manager:
+        def __init__(self):
+            self.latticeVectors = np.eye(3) * 10.0
+            self.atomPositions = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+
+        def set_latticeVectors(self, cell, edit_positions=False):
+            self.latticeVectors = cell
+
+        def set_atomPositions(self, positions):
+            self.atomPositions = positions
+
+    class Structure:
+        def __init__(self):
+            self.AtomPositionManager = Manager()
+
+    def widths(cell):
+        volume = abs(np.linalg.det(cell))
+        return np.array([volume / np.linalg.norm(np.cross(cell[(i + 1) % 3],
+                                                          cell[(i + 2) % 3]))
+                         for i in range(3)])
+
+    strained = mutations.isotropic_strain(0.04)(Structure(),
+                                                rng=np.random.default_rng(0))
+    cell = np.asarray(strained.AtomPositionManager.latticeVectors)
+    factor = cell[0, 0] / 10.0
+    check("strain is within bounds", abs(factor - 1.0) <= 0.04, factor)
+    check("cell stays cubic", np.allclose(cell, np.eye(3) * cell[0, 0]))
+    check("widths stay equal", np.allclose(widths(cell), widths(cell)[0]))
+    check("volume scales as the cube",
+          abs(abs(np.linalg.det(cell)) / 1000.0 - factor ** 3) < 1e-12)
+    # Fractional coordinates must be untouched, or the strain is also a rattle.
+    frac = np.asarray(strained.AtomPositionManager.atomPositions) / cell[0, 0]
+    check("fractional coordinates preserved",
+          np.allclose(frac, np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]) / 10.0))
+
+
 def test_gamma_for():
     """Siblings share a gamma; without that a family is split across the ladder
     by arrival order, which undoes in the child what the parent gained."""
@@ -160,7 +201,7 @@ def test_gamma_for():
 
 for test in [test_pdf_cutoffs, test_deck_text, test_parse_thermo,
              test_objectives, test_front, test_coordination,
-             test_random_subset, test_gamma_for]:
+             test_random_subset, test_isotropic_strain, test_gamma_for]:
     print(test.__name__)
     test()
 

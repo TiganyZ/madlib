@@ -25,10 +25,25 @@ from ezga.factory import build_default_engine, load_config
 from ezga.variation.crossover import crossover_two_cut
 from ezga.variation.mutation import mutation_random_strain, mutation_rattle
 
-from madlib_ezga import Pdf, Potential, Xrd, madlib_runner, random_subset
+from madlib_ezga import (Pdf, Potential, Xrd, isotropic_strain, madlib_runner,
+                         random_subset)
 from madlib_ezga.features import feature_mean_coordination, feature_sp_fractions
 from madlib_ezga.front import write_front
 from madlib_ezga.objectives import objective_energy_per_atom, objective_xrd_rel_error
+
+
+def strain(args):
+    """Isotropic keeps the cell cubic; symmetric shears it triclinic.
+
+    Isotropic is the default because MAD and HRMC never change their cell, so
+    a cubic GA cell is the comparison those two can be read against, and
+    because a sheared cell narrows the distance between opposite faces -- the
+    quantity compute mad/pdf is limited by -- while the collision gate, which
+    only rejects compression, biases an anisotropic walk towards expansion.
+    """
+    if args.strain_mode == "isotropic":
+        return isotropic_strain(args.strain, seed=args.seed + 1)
+    return mutation_random_strain(max_strain=args.strain, seed=args.seed + 1)
 
 
 def mutations(args):
@@ -48,7 +63,7 @@ def mutations(args):
                         constraints=[random_subset(args.rattle_broad_fraction,
                                                    args.seed + 3)],
                         seed=args.seed + 3),
-        mutation_random_strain(max_strain=args.strain, seed=args.seed + 1),
+        strain(args),
     ]
 
 
@@ -161,6 +176,8 @@ def main():
     ap.add_argument("--rattle-broad", type=float, default=0.10)
     ap.add_argument("--rattle-broad-fraction", type=float, default=0.10)
     ap.add_argument("--strain", type=float, default=0.04)
+    ap.add_argument("--strain-mode", choices=("isotropic", "symmetric"),
+                    default="isotropic")
     ap.add_argument("--crossover", type=float, default=0.30)
     ap.add_argument("--temperature", type=float, default=0.25)
     ap.add_argument("--seed", type=int, default=0)
@@ -205,6 +222,7 @@ def main():
     evals = int(spend["steps"]) + spent_on_seeds
     (out / "timing.json").write_text(json.dumps({
         "method": f"ezga_{args.objectives.replace('+', '_')}",
+        "strain_mode": args.strain_mode,
         "wall_seconds": round(wall, 1),
         "evaluations": evals,
         "budget": args.budget,

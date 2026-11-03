@@ -12,6 +12,7 @@ from .constraints import random_subset
 from .deck import Pdf, Potential, Xrd, render
 from .features import feature_mean_coordination, feature_sp_fractions
 from .front import non_dominated, write_front
+from .mutations import isotropic_strain
 from .objectives import objective_energy_per_atom, objective_xrd_rel_error
 from .runner import madlib_runner
 
@@ -21,6 +22,7 @@ __all__ = [
     "Xrd",
     "render",
     "random_subset",
+    "isotropic_strain",
     "feature_mean_coordination",
     "feature_sp_fractions",
     "madlib_runner",
