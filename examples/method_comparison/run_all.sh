@@ -15,6 +15,7 @@ PY=${PY:-python3}
 DATA=${DATA:-$HERE/data}
 OUT=${OUT:-$HERE/runs}
 SEED=${SEED:-12345}
+SCORED=${SCORED:-$DATA/population_scored.xyz}
 
 eval "$("$PY" "$HERE/budget.py" --budget "$BUDGET" \
         --gammas "$(echo "$GAMMAS" | wc -w)" \
@@ -78,30 +79,51 @@ run_hrmc() {
   done
 }
 
+# EZGA simulates only offspring, so a seed read from a file never gets an
+# energy and enters selection at a fake one. Scoring the population is what
+# gives the seeds a real objective; the cost is charged to the GA budget
+# through seed_spend.json. Its own leg, because the two GA legs run
+# concurrently and must not both write the file.
+run_seeds() {
+  "$PY" "$HERE/score_population.py" --population "$DATA/population.xyz" \
+      --out "$SCORED" --data-dir "$DATA" --lmp "$LMP" --target "$TARGET" \
+      --rmax "$RMAX" --nbins "$NBINS" --kde "$KDE" \
+      --qmin "$QMIN" --qmax "$QMAX" --nq "$NQ" \
+      --xrd-output "$OUTPUT" --weighting "$WEIGHTING" --mass "$MASS" \
+      --ranks "$RANKS"
+}
+
 run_ezga() {
   # Two statements, not one: bash expands every argument to `local` before it
   # assigns any of them, so ${kind} on the same line is expanded in the
   # caller's scope where it does not exist -- and set -u then aborts.
   local kind=$1
   local out=$OUT/ezga_${kind//+/_}
+  [ -f "$SCORED" ] || { echo "run the seeds leg first: no $SCORED" >&2; exit 1; }
   local t0=$SECONDS
-  "$PY" "$HERE/run_ga.py" --out "$out" --population "$DATA/population.xyz" \
+  "$PY" "$HERE/run_ga.py" --out "$out" --population "$SCORED" \
       --data-dir "$DATA" --lmp "$LMP" --target "$TARGET" --objectives "$kind" \
+      --budget "$EZGA_BUDGET" \
       --generations "$EZGA_GENERATIONS" --size "$EZGA_POPULATION" \
       --md-steps "$EZGA_MD_STEPS" --relax-steps "$EZGA_RELAX_STEPS" \
       --gammas "$(echo "$GAMMAS" | tr ' ' ',')" --species "$SPECIES" \
       --rmax "$RMAX" --nbins "$NBINS" --qmin "$QMIN" --qmax "$QMAX" --nq "$NQ" \
       --xrd-output "$OUTPUT" --weighting "$WEIGHTING" --seed "$SEED" \
       --ranks "$RANKS"
-  timing "ezga_${kind//+/_}" all "$((SECONDS - t0))" \
-         "$((EZGA_GENERATIONS * EZGA_POPULATION * (EZGA_MD_STEPS + EZGA_RELAX_STEPS)))"
+  # What run_ga.py measured, not what the plan assumed: the GA simulates only
+  # offspring and rejects collided children before evaluating them.
+  local spent
+  spent=$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1]))['evaluations'])" \
+          "$out/timing.json" 2>/dev/null || echo 0)
+  timing "ezga_${kind//+/_}" all "$((SECONDS - t0))" "$spent"
 }
 
 main() {
   prepare
-  local want=${*:-"mad hrmc ezga ezga_exp"}
+  local want=${*:-"seeds mad hrmc ezga ezga_exp"}
   for m in $want; do
     case $m in
+      seeds)    run_seeds ;;
       mad)      run_mad ;;
       hrmc)     run_hrmc ;;
       ezga)     run_ezga energy ;;

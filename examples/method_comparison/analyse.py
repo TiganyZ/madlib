@@ -42,11 +42,25 @@ def natoms(path):
     raise ValueError(f"no atom count in {path}")
 
 
+def link(dst, src):
+    if dst.is_symlink() or dst.exists():
+        dst.unlink()
+    dst.symlink_to(Path(src).resolve())
+
+
 def score(struct, work, args):
     work.mkdir(parents=True, exist_ok=True)
+    # The deck runs with cwd=work, so every path in it resolves from there.
+    # The structure and the potential go in absolute; gap_files and the target
+    # are linked in instead, because potential.lmp names gap_files relatively
+    # and the fix names the target by the same bare name every method used.
+    data = Path(args.data_dir)
+    link(work / "gap_files", data / "gap_files")
+    link(work / args.target, data / args.target)
     deck = work / "in.score"
     deck.write_text(DECK.format(
-        struct=struct, mass=args.mass, comm=args.comm, potential=args.potential,
+        struct=Path(struct).resolve(), mass=args.mass, comm=args.comm,
+        potential=Path(args.potential).resolve(),
         rmax=args.rmax, nbins=args.nbins, kde=args.kde, target=args.target,
         qmin=args.qmin, qmax=args.qmax, nq=args.nq, output=args.output,
         species=args.species, weighting=args.weighting))
@@ -81,10 +95,13 @@ def non_dominated(points):
 def collect(runs):
     """Every structure each method left behind, tagged with its method."""
     found = []
+    # The GA legs are read from structures/, which export_db.py writes out of
+    # the SAGE database. Globbing their work directories picks up start.data,
+    # the structure before its relaxation, in a directory the runner reuses.
     for pattern, method in (("mad_gamma*/final.data", "mad"),
                             ("hrmc_gamma*/final.data", "hrmc"),
-                            ("ezga_energy/**/*.data", "ezga"),
-                            ("ezga_energy_exp/**/*.data", "ezga_exp")):
+                            ("ezga_energy/structures/*.data", "ezga_energy"),
+                            ("ezga_energy_exp/structures/*.data", "ezga_energy_exp")):
         for path in sorted(Path(runs).glob(pattern)):
             found.append((method, path))
     return found
@@ -97,6 +114,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--target", required=True)
     ap.add_argument("--potential", default="potential.lmp")
+    ap.add_argument("--data-dir", default="data")
     ap.add_argument("--species", default="C")
     ap.add_argument("--mass", default="12.011")
     ap.add_argument("--comm", default="9.3")
