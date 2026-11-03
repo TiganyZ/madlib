@@ -36,16 +36,23 @@ $$
 \frac{\partial y_i}{\partial \mathbf{r}_j}
 $$
 
-That second term is the whole method. The potential keeps the structure
-physical; the data decides between the many structures the potential is happy
-with. Run it as MD and it is *molecular augmented dynamics*; run it as Monte
-Carlo and it is *reverse Monte Carlo*.
+The second term allows for gradient-based optimization of the structure with
+respect to experimental data. 
+
+Then running MD (through say an annealing protocol) will provide a
+multi-objective optimization of both the potential energy and experimental
+agreement.  
+
+The potential keeps the structure physical; the
+experimental data funnels the structure search to areas of experimental agreement. 
+
+Ran as MD and it is *molecular augmented dynamics*; ran using the energy+exp disagreement and it is Hybrid Reverse Monte Carlo (HRMC).
 
 When the prediction is in arbitrary units, `fit yes` fits a scale $s$ and
 baseline $b$ by weighted least squares and compares $s y_i + b$ instead. Both
 sit at their own optimum, so the force picks up no extra term.
 
-### Two numbers to watch
+### The Dissimilarity
 
 $$
 D \;=\; \sum_i w_i \left( y_i - y^\text{exp}_i \right)^2
@@ -62,12 +69,11 @@ follow during a run.
 1. Run once with `gamma 0.0`. Nothing is biased; read $D$ from `f_mad[3]`.
 2. Pick $\gamma$ so that $\tfrac{1}{2}\gamma D$ is a **small fraction of the
    cohesive energy** of your system.
-3. Give `gamma` two values to ramp it linearly over the run, so the restraint
+3. Give `gamma` two values (the starting value and the ending value of the run) to ramp it linearly over the run, so the restraint
    switches on without kicking the structure at step 0.
 
 > A $\gamma$ too large by orders of magnitude pulls the structure apart *while
-> the reported mismatch falls*. That does not look like a failure, so size it
-> from step 1 rather than guessing.
+> the reported mismatch falls* (the potential imparts nothing to the optimization).
 
 ---
 
