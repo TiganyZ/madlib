@@ -127,13 +127,27 @@ first. A real experiment goes in exactly the same place, as two columns of
 shift and intensity. Keeping the DFT one is what makes the example checkable:
 you know what the answer should be.
 
-**The numbers to expect.** On frame 0 of the 300-atom set (100 Si, a 16.552 Å
-cube) the DFT lineshape peaks at **−106.4 ppm** and the paper's own ML
-prediction at **−106.8 ppm**, which is where amorphous silica's
-<sup>29</sup>Si resonance is. That the mean stored shielding for Si,
-755.3167/√3 = 436.1 ppm, gives 328.4 − 436.1 = −107.7 ppm is the one-line
-sanity check on the whole chain: de-standardisation, the spherical-to-Cartesian
-transform, and the shielding-to-shift map.
+**The numbers to expect**, measured on frame 0 of the 300-atom set (100 Si, a
+16.552 Å cube):
+
+| | |
+|---|---|
+| per-atom tensors vs the file's own `ML_ISD_ms` | max **3e-4 ppm**, rms 1e-4, over shieldings spanning 153–452 ppm |
+| DFT lineshape peak | **−106.4 ppm** (the ML one, −106.8) |
+| `rel_error` of the ML lineshape against the DFT target | **0.0142** |
+| `D` for that, hence gamma for 0.02 eV/atom | 2.0e-4, so gamma ≈ 840 |
+| the rattled structure, before biasing | `rel_error` 0.625 |
+| after 100 steps at that gamma, `every 5` | `rel_error` 0.285, `c_pepair` −2284 → −2588 eV |
+
+The first row is the one that matters: 3e-4 ppm is float32 round-off, so the
+whole chain — graph, edge convention, per-species de-standardisation,
+spherical-to-Cartesian transform, Voigt ordering — reproduces the authors' own
+`nequip-evaluate` output. The 0.0142 is the model's error against DFT and is
+the floor; 100 steps is a demo, not a converged run, and a real one ramps
+gamma over the whole trajectory.
+
+As a one-line sanity check with no model at all: the mean stored shielding for
+Si, 755.3167/√3 = 436.1 ppm, gives 328.4 − 436.1 = −107.7 ppm.
 
 **The model's own error is a floor.** `si29_ml_in_file.dat` is the lineshape
 of the paper's own prediction for this structure, and `si29_dft.dat` the DFT
@@ -168,10 +182,12 @@ split.
 
 ## Cost
 
-Six message-passing layers over a 5.533 Å graph on 300 atoms, on a CPU, is
-the whole cost of a timestep. Two things make it affordable: `every N` applies
-the bias on one step in N (it is a slowly varying restraint, not a force that
-needs resolving every femtosecond), and the computes in `in.predict` share one
+Six message-passing layers over a 5.533 Å graph on 300 atoms cost **about 26
+seconds per evaluation** — forward and backward — on one CPU core. That is the
+whole cost of a biased step: the 100-step run above took 522 s with `every 5`,
+so twenty evaluations. Use a GPU (`device=cuda`) for anything longer, and
+`every N` regardless: this is a slowly varying restraint, not a force that
+needs resolving every femtosecond. The computes in `in.predict` share one
 loaded model and one cached forward pass, so the isotropic shielding, the span
 and the tensor cost one model evaluation between them.
 

@@ -64,7 +64,10 @@ def destandardise(raw, numbers, stats, layout, dtype=None):
     if raw.shape[1] != layout["width"]:
         raise ValueError(f"this parameter expects {layout['width']} output components per atom, "
                          f"but the model gave {raw.shape[1]}")
+    # these models run at model_dtype float32 under default_dtype float64, so
+    # the output comes back narrower than the statistics it is scaled by
     dtype = dtype or raw.dtype
+    raw = raw.to(dtype)
 
     def stat(key):
         if key not in stats:
