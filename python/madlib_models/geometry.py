@@ -1,29 +1,25 @@
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """The geometry LAMMPS hands over, as a graph a message-passing model can eat.
 
-compute mad/property/python sends one of two things, and which one is decided
-by the cell being all zeros or not.
+Which of the two arrives is decided by the cell being all zeros or not.
 
-GHOST CLOUD (the default, and the only one that works under MPI). Positions
-cover the owned atoms and their ghosts, each ghost already carrying the
-position of the image it stands for, and the edge list is the compute's own
-neighbour list over them. The model therefore runs on a finite cluster with no
-periodicity at all, and only the owned atoms' values are read. It is exact as
-long as the ghost shell reaches the model's whole interaction range -- for a
-message-passing model that is num_layers * r_max, not r_max -- which is what
-the compute's 'cutoff' and comm_modify cutoff have to cover.
+GHOST CLOUD (the default, and the only MPI-capable one). Positions cover owned
+atoms and their ghosts, each ghost carrying the position of the image it
+stands for, with the compute's own edge list over them: a finite cluster, no
+periodicity, only the owned atoms' values read. The ghost shell must reach the
+model's whole range, and see compute_mad_property_python.h for why that is
+still approximate beyond one message.
 
-ONE PERIODIC CELL ('pbc yes'). Positions are the owned atoms only and the cell
-is real, so the neighbour list has to be built here, with periodic images. One
-rank only, by construction.
+ONE PERIODIC CELL ('pbc yes'). Owned atoms and a real cell, so the neighbour
+list is built here with periodic images. One rank.
 
-EDGE DIRECTION. Both MACE and NequIP build their lists with ASE's 'ijS'
-convention, D = pos[j] - pos[i] + S.cell, store edge_index = (i, j), and
-aggregate messages onto j. So the CENTRE of an environment is edge_index[1],
-and the edge vector points from the neighbour to the centre. LAMMPS gives the
-opposite pairing -- (centre, neighbour) -- so the two are swapped here. Get it
-backwards and every edge vector flips: a model with odd-parity features then
-returns a different number, with nothing to show that anything is wrong.
+EDGE DIRECTION. MACE and NequIP both build their lists with ASE's 'ijS'
+convention -- D = pos[j] - pos[i] + S.cell, edge_index = (i, j) -- and
+aggregate onto j, so the CENTRE of an environment is edge_index[1] and the
+edge vector points from neighbour to centre. LAMMPS pairs the other way
+round, (centre, neighbour), so the two are swapped here. Backwards, every edge
+vector flips and a model with odd-parity features returns a different number
+with nothing to show for it.
 """
 
 from dataclasses import dataclass

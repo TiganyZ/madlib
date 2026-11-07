@@ -103,8 +103,6 @@ FixMADNmrAniso::FixMADNmrAniso(LAMMPS *lmp, int narg, char **arg) :
     }
   }
 
-  // Same trap as fix mad/nmr: a shielding broadened against a shift target is
-  // a mirrored spectrum, and the scale/offset fit hides it.
   if (!said_convention)
     error->all(FLERR,
                "fix {} needs the convention stated: 'reference <a> [slope <b>]' to convert a "
@@ -159,10 +157,8 @@ void FixMADNmrAniso::init()
   if (!prop) error->all(FLERR, "fix {} lost its compute {}", style, propid);
 }
 
-/* ----------------------------------------------------------------------
-   A golden-spiral grid over the hemisphere, which is enough because
-   omega(n) = omega(-n), with v(n) stored rather than n itself.
-------------------------------------------------------------------------- */
+/* A golden-spiral hemisphere grid -- enough, since omega(n) = omega(-n) --
+   stored as v(n) rather than n. */
 
 void FixMADNmrAniso::build_orientations()
 {
@@ -249,8 +245,7 @@ void FixMADNmrAniso::accumulate_bias(const double *dEdy)
 {
   const double dx = xgrid[1] - xgrid[0];
 
-  // Adjoint of the normalisation; the projection term is what a naive 1/||u||
-  // misses. Identical to fix mad/xps, for the same reason.
+  // the projection term is what a naive 1/||u|| misses; see fix mad/xps
   std::vector<double> dEdu(nk);
   if (normalise == N_L2) {
     double proj = 0.0;
@@ -286,7 +281,7 @@ void FixMADNmrAniso::accumulate_bias(const double *dEdy)
         const double v = xgrid[k] - xi;
         acc += dEdu[k] * v * sinv2 * exp(-v * v * s2inv);
       }
-      // d(omega_i)/d(T_(i,c)) is v_c, and d(x_i)/d(omega_i) is qscale
+      // d omega_i / d T_(i,c) is v_c; d x_i / d omega_i is qscale
       const double s = acc * wquad * qscale;
       const double *v = &nvec[(size_t) m * NVOIGT];
       for (int c = 0; c < NVOIGT; c++) lambda[i][c] += s * v[c];

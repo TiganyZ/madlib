@@ -1,13 +1,10 @@
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 #
-# 3072 orientations, far more than a spectrum needs, because of what the
-# shear virial measures. A finite orientation grid is not invariant under
-# rotation of the sample, so the bias carries a small torque: sum_i r_i (x)
-# f_i has an antisymmetric part, the reported stress is its symmetric half,
-# and a tilt-strain finite difference sees one off-diagonal element alone.
-# The two therefore differ by the quadrature's torque, which falls as 1/N --
-# 2.3e-2 at 48 orientations, 1.4e-3 at 768 -- so the test converges the
-# quadrature rather than loosening the tolerance.
+# 3072 orientations, far more than a spectrum needs, because a tilt-strain
+# finite difference sees one off-diagonal element of sum r (x) f while the
+# reported stress is its symmetric half. The two differ by the quadrature's
+# torque, which falls as 1/N: 2.3e-2 of the shear at 48, 1.4e-3 at 768. The
+# test converges the quadrature rather than loosening the tolerance.
 compute t   all mad/property/python madlib_models ncomp 6 cutoff 3.0 &
             config "backend=callable fn=mad_tensor_toy:tensor types=C,O quantity=tensor6"
 fix     mad all mad/nmr/aniso c_t target data/nmr_aniso_target.dat &

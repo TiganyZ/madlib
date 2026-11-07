@@ -3,14 +3,14 @@
 
     config "backend=callable fn=my_module:my_property types=Si,O rcut=5.0"
 
-`my_property(graph)` is handed the Graph of geometry.py -- positions on the
-autograd tape, the cell, the edge list, the atomic numbers -- and returns
-either a tensor of per-atom values or a dict of them. Nothing else: the
-caching, the reduction and the backward pass are the engine's.
+`my_property(graph)` gets the Graph of geometry.py -- positions on the
+autograd tape, the cell, the edges, the atomic numbers -- and returns per-atom
+values, or a dict of them. The caching, the reduction and the backward pass
+stay in the engine.
 
-This is the escape hatch for a model no listed backend covers, and it is what
-the tests use, since a property whose value is known in closed form is the
-only kind that can prove the plumbing rather than agree with it.
+The escape hatch for a model no backend covers, and what the tests use: a
+property with a closed form is the only kind that can prove the plumbing
+rather than agree with it.
 """
 
 import importlib

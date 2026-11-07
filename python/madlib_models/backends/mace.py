@@ -4,41 +4,26 @@
     compute q all mad/property/python madlib_models ncomp 1 cutoff 12.0 &
             config "backend=mace model=cebe.model types=C,O"
 
-WHICH OUTPUT. A MACE model returns a dict, and the per-atom entries of it are
-what can be a property: `node_energy` from any energy model, `charges` and
-`atomic_dipoles` from a dipole model, `node_feats` if you want descriptors.
-`output=` names one and the default is node_energy, because that is where a
-model trained on a per-atom target puts it -- fitting core-electron binding
-energies as if they were atomic energy contributions is the usual way to get
-them out of an energy-shaped architecture, and `fix mad/xps` then reads them
-with no further ceremony. A per-graph output such as `energy` or a total
-`dipole` has one row where a property needs one per atom, and is refused on
-that ground rather than reshaped.
+`output=` names which of the model's outputs to read. The default is
+node_energy, where a model trained on a per-atom target puts it -- fitting
+core-electron binding energies as atomic energy contributions is the usual way
+to get them out of an energy-shaped architecture. `charges` and
+`atomic_dipoles` come from a dipole model. A per-graph output such as `energy`
+has one row where a property needs one per atom, and is refused on that
+ground.
 
-    XPS            output=node_energy  quantity=scalar    ncomp 1
-    IR             output=atomic_dipoles quantity=vector  ncomp 3
-    NMR, isotropic output=<tensor head> quantity=iso      ncomp 1
-    NMR, powder    output=<tensor head> quantity=tensor6  ncomp 6
+THE CUTOFF HAS TO REACH r_max, AND REACHING FURTHER BUYS NOTHING, which is not
+what one would guess for a multi-layer model: LAMMPS lists the neighbours of
+owned atoms, so a ghost receives no messages and a second layer reads an
+un-updated feature for every neighbour that is one. A 4 A shell and a 2.5 A
+shell give the same numbers to the last bit, and a two-layer model at r_max 2
+A is 6e-4 eV/atom from MACE's own pipeline where a one-layer model is 4e-16
+from it. 'pbc yes' is exact. A cutoff SHORTER than r_max is an error -- the
+model is then missing edges it was fitted with -- and the multi-layer caveat
+is said once per run, which ghost_check=no silences.
 
-THE COMPUTE'S CUTOFF HAS TO REACH r_max, and reaching further buys nothing.
-This is not what one would guess for a model that passes several messages, and
-the reason is in how LAMMPS lists neighbours: the list covers OWNED atoms, so
-every edge handed over ends on an owned atom and a ghost receives no messages
-of its own. A second layer then reads an un-updated feature for every
-neighbour that is a ghost, and no depth of ghost shell changes that -- a 4 A
-shell and a 2.5 A shell give the same numbers to the last bit. Measured
-against MACE's own pipeline on a 91-atom cell, a two-layer model at r_max 2 A
-is 6e-4 eV per atom out; the same model with one layer agrees to 4e-16.
-
-So: in 'pbc yes' the model builds its own graph and the answer is exact. On a
-ghost cloud -- the MPI route -- a one-pass model is exact and a deeper one is
-approximate near every subdomain and periodic boundary. The error is reported
-here once rather than left to be discovered, and `ghost_check=no` silences it.
-A cutoff SHORTER than r_max is a different thing and an error: the model is
-then missing edges it was trained to have.
-
-Edges longer than r_max are dropped, since MACE's radial envelope is exactly
-zero beyond it. That changes no value; it only saves the work.
+Edges longer than r_max are dropped: MACE's radial envelope is zero beyond it,
+so this changes no value and saves the work.
 """
 
 import numpy as np

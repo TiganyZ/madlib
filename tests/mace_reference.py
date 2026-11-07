@@ -4,13 +4,12 @@
 
     mace_reference.py <dump> <data file> <model> [tolerance]
 
-The dump holds one value per atom, written by compute mad/property/python
-through the madlib_models mace backend. The reference runs the same model on
-the same cell through mace.data.AtomicData -- MACE's own neighbour list, its
-own edge convention, its own one-hot encoding -- so what is compared is
-MADLIB's reconstruction of the graph against the one the weights were trained
-with. Flip the edge direction and this is what notices.
+The reference runs the same model on the same cell through mace.data.AtomicData
+-- MACE's neighbour list, its edge convention, its one-hot encoding -- so what
+is compared is MADLIB's reconstruction of the graph. Flip the edge direction
+and this is what notices.
 """
+
 import sys
 
 import numpy as np

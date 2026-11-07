@@ -53,7 +53,15 @@ export PREFIX=/scratch/$USER/nmr_sio2     # not $HOME: torch is a lot of files
 **The fork is not optional.** The models' `config.yaml` names a
 `MagResTensorModel` builder that upstream NequIP does not have, so without
 [cbenmahm/nequip-nmr-parameters][code] the weights cannot be rebuilt into a
-model at all.
+model at all. `make_venv.sh` clones it rather than installing it: it is pure
+Python, so `PYTHONPATH` is all it needs, and nothing in the package is
+executed until a model is loaded.
+
+**Set `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1`.** A NequIP 0.6 checkpoint is a
+pickled model object rather than a state dict, and torch 2.6 and later refuse
+to unpickle one by default. The backend turns that failure into a sentence
+saying so, but the switch is the environment's, and it is global — set it for
+decks that load models you trust, not in your shell profile.
 
 **One environment per model family.** That fork pins `e3nn < 0.6` and
 `mace-torch` pins `0.4.4`; a venv that satisfies both is luck. `compute
@@ -67,7 +75,18 @@ export PYTHONPATH=$PREFIX/madlib/python:$($PREFIX/venv/bin/python -c \
 
 ## Run it
 
-Predict first, and score against the target without biasing anything:
+First, check the model against the prediction the structure file already
+carries — `ML_ISD_ms`, made by the authors with `nequip-evaluate`, which owes
+nothing to this code. It tests the graph, the edge convention, the per-species
+de-standardisation, the spherical-to-Cartesian transform and the Voigt
+ordering in one number:
+
+```sh
+lmp -in .../lammps/in.tensors -var data silica.data
+./setup/check_model.py ms_tensors.dump $PREFIX/models/aSiO2_models.xyz 0
+```
+
+Then predict, and score against the target without biasing anything:
 
 ```sh
 cd $PREFIX/runs

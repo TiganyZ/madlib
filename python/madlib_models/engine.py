@@ -1,28 +1,19 @@
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """The forward pass, its cache, and the one backward pass MADLIB asks for.
 
-A backend's job is to turn a Graph into a dict of per-atom outputs and nothing
-else. Everything that is the same whatever the model -- holding the loaded
-model, not evaluating it twice for one geometry, reducing its output, taking
-the weighted gradient, and handing back the three extra rows a periodic run's
-virial needs -- is here.
+A backend turns a Graph into a dict of per-atom outputs and nothing else.
+Everything model-independent is here: holding the model, not evaluating it
+twice for one geometry, reducing the output, taking the weighted gradient, and
+the three extra rows a periodic virial needs.
 
-THE ADJOINT IS A GRADIENT, AND THE FORCE IS MINUS IT. What the compute wants
-back is
+    f_a = - d/dr_a sum_i lambda_i . q_i,  lambda held fixed
 
-    f_a = - d/dr_a sum_i lambda_i . q_i
+In 'pbc yes' mode three rows follow the forces: -dE/dh, without which the
+virial is missing what the periodic images carry.
 
-with lambda held fixed, which is one backward pass over the forward the
-property already ran. In 'pbc yes' mode three rows follow the forces: -dE/dh,
-the gradient with respect to the cell vectors, without which the virial is
-missing every contribution carried by a periodic image.
-
-CACHED BY GEOMETRY, NOT BY TIMESTEP. An MC fix re-prices a trial move inside
-one timestep, so a property cached on the step number would report the old
-structure's spectrum for the new one and accept the move on it. The key is the
-positions, the cell, and the edge list -- the last because two computes may
-share one model with different cutoffs, and the shorter one must not be served
-the longer one's forward pass.
+Cached by geometry, not by timestep -- an MC fix re-prices a trial move inside
+one step. The edge list is part of the key because two computes may share a
+model with different cutoffs.
 """
 
 import numpy as np

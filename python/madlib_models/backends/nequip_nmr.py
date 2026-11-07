@@ -1,47 +1,36 @@
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """The anisotropic NMR parameter models of Ben Mahmoud et al., as a property.
 
-    Graph-neural-network predictions of solid-state NMR parameters from
-    spherical tensor decomposition -- C. Ben Mahmoud, L. A. M. Rosset,
-    J. R. Yates, V. L. Deringer, arXiv:2412.15063
-    data   https://github.com/cbenmahm/anistropic-nmr-parameters-data
-    code   https://github.com/cbenmahm/nequip-nmr-parameters
+    arXiv:2412.15063 · data github.com/cbenmahm/anistropic-nmr-parameters-data
+                     · code github.com/cbenmahm/nequip-nmr-parameters
 
-Two models, both NequIP networks that predict a rank-2 tensor per atom through
-its irreducible spherical components rather than its nine Cartesian ones:
+Two NequIP networks predicting a rank-2 tensor per atom through its
+irreducible spherical components:
 
-    parameter=ms    the magnetic shielding tensor, irreps 0e+1e+2e, in ppm
+    parameter=ms    the magnetic shielding tensor, irreps 0e+1e+2e, ppm
     parameter=efg   the electric field gradient, irreps 2e, traceless
 
     compute sig all mad/property/python madlib_models ncomp 6 pbc yes &
-            config "backend=nequip_nmr parameter=ms quantity=tensor6 &
-                    model=models/MS/final/isd/minimal types=Si,O &
-                    stats=data/data_mean_std.json"
+            config "backend=nequip_nmr parameter=ms quantity=tensor6 \
+                    model=models/MS/final/isd/minimal types=Si,O \
+                    stats=data_mean_std.json"
 
 WHAT COMES OUT OF THE NETWORK IS STANDARDISED, and nothing in the file says
-so. The training targets were centred and scaled per species and per
-irreducible block, so the raw output is in units of that block's standard
-deviation about its mean, and a shielding read straight from the model is a
-number near zero rather than near 350 ppm. The inverse is applied here with
-the authors' own data_mean_std.json, exactly as their
-3-transform-to-cartesian.py does: component 0 and components 4:9 are the
-symmetric block in the order (l=0, l=2), components 1:4 the antisymmetric one,
-and `stats=` is not optional.
+so: the targets were centred and scaled per species and per irreducible block,
+so a shielding read straight from the model is a number near zero rather than
+near 350 ppm. The inverse needs the authors' data_mean_std.json, and `stats=`
+is not optional. Component 0 and components 4:9 are the symmetric block in the
+order (l=0, l=2), components 1:4 the antisymmetric one -- their own
+3-transform-to-cartesian.py. For the EFG the l=0 block is absent and its
+stored deviation is zero, a field gradient being traceless.
 
-For the EFG the l=0 block is absent from the model and its stored standard
-deviation is zero -- an electric field gradient is traceless by construction,
-and the tensor is rebuilt that way.
+ONE PERIODIC CELL, ONE RANK. Six layers over a 5.533 A graph read 33 A around
+every atom, so 'pbc yes' is required rather than preferred, and the graph is
+built by NequIP's own AtomicData so the edge convention is the one the weights
+were trained with.
 
-ONE PERIODIC CELL, ONE RANK. Six message-passing layers over a 5.533 A graph
-read 33 A around every atom, so the ghost-cloud route would need a 33 A ghost
-shell -- hundreds of images of a cell this size. 'pbc yes' is therefore
-required, not merely preferred, and the graph is built by NequIP's own
-AtomicData so that the edge convention is the one the weights were trained
-with rather than one reconstructed here.
-
-SHIELDING, NOT SHIFT. The MS model predicts an absolute shielding. fix mad/nmr
-and fix mad/nmr/aniso are what convert it to a shift, and both refuse to run
-until told which they have been given.
+The MS model predicts an absolute shielding; fix mad/nmr and
+fix mad/nmr/aniso convert, and refuse to run until told which they have.
 """
 
 import json
@@ -155,14 +144,26 @@ def _load(path, name, device):
     if not os.path.exists(path):
         raise ValueError(f"no model at '{path}'; it should be a NequIP training directory "
                          f"holding best_model.pth and config.yaml, or a deployed .pth")
-    if os.path.isdir(path):
-        from nequip.train import Trainer
-        model, config = Trainer.load_model_from_training_session(
-            traindir=path, model_name=name or "best_model.pth", device=str(device))
-        return model, dict(config)
-    from nequip.scripts.deploy import load_deployed_model
-    model, metadata = load_deployed_model(path, device=str(device), set_global_options=False)
-    return model, metadata
+    try:
+        if os.path.isdir(path):
+            from nequip.train import Trainer
+            model, config = Trainer.load_model_from_training_session(
+                traindir=path, model_name=name or "best_model.pth", device=str(device))
+            return model, dict(config)
+        from nequip.scripts.deploy import load_deployed_model
+        model, metadata = load_deployed_model(path, device=str(device),
+                                              set_global_options=False)
+        return model, metadata
+    except Exception as exc:
+        # A NequIP 0.6 checkpoint is a pickled model object, not a state dict,
+        # so torch 2.6's weights_only default cannot read it and says so in a
+        # pickler rather than in a sentence about this.
+        if "weights_only" in str(exc) or "WeightsUnpickler" in str(exc):
+            raise RuntimeError(
+                "this checkpoint is a pickled model object, which torch 2.6 and later refuse "
+                "to load by default. Set TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 in the environment "
+                "the deck runs in, and only for models you trust") from None
+        raise
 
 
 class _NequipNmr(Backend):

@@ -25,12 +25,16 @@ install_deps() {
     uv pip install --python "$PY" numpy "e3nn<0.6" ase pyyaml tqdm torch-runstats torch-ema
 }
 
-install_nequip_fork() {
-    uv pip install --python "$PY" --no-deps "git+$NEQUIP_FORK"
+# A clone on PYTHONPATH rather than an install. The fork is pure Python, so
+# `pip install` buys nothing over this, and nothing in the package is executed
+# until a model is actually loaded.
+clone_nequip_fork() {
+    [ -d "$FORK_DIR/.git" ] || git clone -q --depth 1 "$NEQUIP_FORK" "$FORK_DIR"
+    git -C "$FORK_DIR" log --oneline -1
 }
 
 report() {
-    "$PY" - <<'PYEOF'
+    PYTHONPATH=$FORK_DIR "$PY" - <<'PYEOF'
 import ase, e3nn, nequip, torch
 print("torch ", torch.__version__)
 print("e3nn  ", e3nn.__version__)
@@ -39,12 +43,15 @@ print("nequip", nequip.__version__)
 from nequip.model import MagResTensorModel  # noqa: F401
 print("MagResTensorModel: present")
 PYEOF
-    echo "site-packages: $("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+    echo
+    echo "put both of these on PYTHONPATH for a deck that uses backend=nequip_nmr:"
+    echo "  $FORK_DIR"
+    echo "  $("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
 }
 
 export UV_CACHE_DIR=$PREFIX/uvcache
 make_venv
 install_torch
 install_deps
-install_nequip_fork
+clone_nequip_fork
 report

@@ -4,14 +4,14 @@
 
     make_mace_toy.py _mace_toy.model [layers]
 
-Random weights are not a handicap here: what has to be proved is that the
-geometry MADLIB hands over reproduces the one MACE's own data pipeline would
-build -- the edge direction above all, which is silently wrong rather than
-loudly wrong -- and an untrained model separates the two just as well as a
-fitted one, in a second rather than a GPU-hour. Two layers over a 2 A graph, so the ghost
-shell a test needs is 4 A -- and one layer, which is the control that says
-what a difference between the two geometries means.
+Random weights are no handicap: what has to be proved is that the geometry
+MADLIB hands over is the one MACE's own pipeline would build -- the edge
+direction above all, which is silently wrong rather than loudly wrong -- and
+an untrained model separates those in a second. Two layers over a 2 A graph
+needs a 4 A ghost shell; one layer is the control that says what a difference
+between the two geometries means.
 """
+
 import sys
 
 import numpy as np

@@ -42,24 +42,19 @@ namespace LAMMPS_NS {
    with q of shape (nlocal,) or (nlocal, ncomp), and f equal to
    -d/dr sum_i lam_i . q_i -- one backward pass for a torch model.
 
-   ncomp is whatever the observable reading it wants: 1 for a binding energy or
-   a chemical shielding, 3 for a dipole, 6 for a symmetric shielding or
-   polarizability tensor in Voigt order. The fix that consumes it is what
-   insists on a particular width, not this compute.
+   ncomp is whatever the observable wants: 1 for a binding energy, 3 for a
+   dipole, 6 for a symmetric tensor in Voigt order. The fix insists on a
+   width; this compute does not.
 
-   ONE MODULE, MANY COMPUTES. A module configured only by its import -- by
-   environment variables, say -- can serve one model and one quantity per
-   deck, which is a poor fit for a general bridge: a MACE model's binding
-   energies and the same model's dipoles are two computes. So a module may
-   instead supply
+   A module configured only by its import serves one model per deck, which is
+   no good for a deck wanting a model's binding energies AND its dipoles. So a
+   module may instead supply
 
      mad_bind(config) -> (compute_fn, adjoint_fn)
 
-   where config is the string given to the 'config' keyword, and the two
-   returned callables have the signatures above. Each compute binds
-   separately, so each gets its own closed-over state. A 'config' string
-   handed to a module without mad_bind is an error rather than an ignored
-   argument: a silently unconfigured model still returns numbers.
+   given the 'config' keyword's string, so each compute gets its own state. A
+   config handed to a module without mad_bind is an error: a model left on an
+   import-time default still returns numbers.
 
    TWO WAYS TO SAY WHERE THE ATOMS ARE, and the model picks by looking at cell.
 
@@ -71,16 +66,13 @@ namespace LAMMPS_NS {
    owners. This is the general case and the only one that works under MPI.
 
    IT IS EXACT FOR A ONE-PASS MODEL AND APPROXIMATE FOR A MESSAGE-PASSING ONE,
-   however deep the ghost shell is made. LAMMPS builds neighbour lists for
-   OWNED atoms, so the edges here all end on an owned atom and a ghost
-   receives no messages of its own. A model that passes one message is
-   unaffected -- it only needs each owned atom's neighbours, which are all
-   here. A model that passes two needs its neighbours' messages, which need
-   the ghosts' own neighbours, and those edges do not exist. Measured on a
-   91-atom cell with a two-layer MACE at r_max 2 A and a 4 A shell, the error
-   is 6e-4 eV per atom, while the same model with one layer agrees to 4e-16
-   (tests/run.sh mlprop checks both, so the claim is a number rather than a
-   hope). 'pbc yes' has no such error: there the model builds its own graph.
+   however deep the ghost shell. LAMMPS lists the neighbours of OWNED atoms,
+   so every edge ends on an owned atom and a ghost receives no messages of its
+   own; a second layer then reads an un-updated feature for every neighbour
+   that is a ghost. Measured against MACE's own pipeline on a 91-atom cell, a
+   two-layer model at r_max 2 A is 6e-4 eV/atom out -- with a 4 A shell and
+   with a 2.5 A one alike -- while one layer agrees to 4e-16. 'pbc yes' has no
+   such error: there the model builds its own graph. tests/run.sh mlprop.
 
    With 'pbc yes', cell holds the three cell vectors, positions are the owned
    atoms only, and a model that handles periodicity itself is left to. This is

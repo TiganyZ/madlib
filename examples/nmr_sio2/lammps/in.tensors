@@ -1,0 +1,22 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The six Voigt components of every atom's shielding tensor, to compare with
+# the prediction the published structure file carries.
+#
+#   export MADLIB_NMR_MODELS=/path/to/models
+#   lmp -in in.tensors -var data silica.data
+
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       ${data}
+
+pair_style      vashishta
+pair_coeff      * * SiO.1990.vashishta Si O
+
+compute sig all mad/property/python madlib_models ncomp 6 pbc yes &
+            config "backend=nequip_nmr parameter=ms quantity=tensor6 model=$MADLIB_NMR_MODELS/ms stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
+
+dump        d all custom 1 ms_tensors.dump id type c_sig[1] c_sig[2] c_sig[3] c_sig[4] c_sig[5] c_sig[6]
+dump_modify d format float %.10g sort id
+run 0

@@ -88,6 +88,9 @@ output is standardised per species and per irreducible block and nothing in
 the weights says so. `pbc yes` only: six layers over a 5.5 Å graph read 33 Å.
 See [`examples/nmr_sio2`](../examples/nmr_sio2/README.md).
 
+To put a new quantity or a whole new spectrum behind this, see
+[`docs/ADDING-AN-OBSERVABLE.md`](../docs/ADDING-AN-OBSERVABLE.md).
+
 **`callable`** is the escape hatch: `fn=my_module:my_property`, handed the
 geometry on the autograd tape, returning per-atom values. The caching, the
 reduction and the backward pass stay here.

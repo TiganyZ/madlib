@@ -5,14 +5,12 @@
     nmr_aniso_reference.py <tensor dump> <spectrum file> <sigma> <norient> \
                            <reference> <slope> [tolerance]
 
-The dump holds the six Voigt components per atom and the spectrum file is what
-the fix wrote. Everything between the two -- the orientation average, the
-Gaussian broadening, the shielding-to-shift map and the normalisation -- is
-redone here in numpy from the formula in the documentation, so a factor of two
-in the off-diagonal components, a hemisphere mistaken for a sphere or a
-normalisation applied twice shows up as a disagreement rather than as a
-spectrum that merely looks plausible.
+The orientation average, the broadening, the shielding-to-shift map and the
+normalisation are redone in numpy from the documented formula, so a factor of
+two in the off-diagonal components, a hemisphere mistaken for a sphere or a
+normalisation applied twice shows up as a disagreement.
 """
+
 import sys
 
 import numpy as np

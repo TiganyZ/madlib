@@ -1,29 +1,22 @@
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 """Model output -> the quantity an observable reads, differentiably.
 
-A model predicts what it was trained on: a scalar, a dipole, a rank-2 tensor
-in nine Cartesian components or six symmetric ones. An observable reads what
-it needs: one number per nucleus for a broadened spectrum, three for a dipole,
-six for a powder lineshape. The reductions here are that map, and each is a
-torch expression so the adjoint stays one backward pass.
+A model predicts what it was trained on; an observable reads what it needs.
+These are that map, as torch expressions, so the adjoint stays one backward
+pass.
 
-VOIGT ORDER IS (xx, yy, zz, xy, xz, yz) throughout -- what fix mad/nmr/aniso
-expects -- and the off-diagonal components are the tensor elements themselves,
-with no factor of two folded in. The factor of two that appears in
-omega = n.T.n lives in the fix, not here.
+VOIGT ORDER IS (xx, yy, zz, xy, xz, yz) throughout, with the off-diagonal
+components the tensor elements themselves: the factor of two in omega = n.T.n
+lives in the fix, not here.
 
-ONLY THE SYMMETRIC PART of a tensor reaches a reduction that treats it as one.
-An NMR experiment cannot see the antisymmetric part to first order, so a model
-predicting a general tensor has it dropped rather than quietly carried into an
-eigenvalue problem that does not want it.
+Only the symmetric part of a tensor reaches a reduction that treats it as one,
+since an NMR experiment cannot see the rest to first order.
 
-DEGENERACIES. 'span' is the largest principal value minus the smallest; those
-two can coincide only when all three do, so it needs no ordering convention
-and crosses no branch. 'vzz' and 'etaq' do order the principal values -- the
-quadrupolar convention |Vzz| >= |Vyy| >= |Vxx| -- and etaq divides by Vzz, so
-its gradient is unbounded for a site whose field gradient vanishes. That makes
-etaq a quantity to predict and plot; biasing on it is asking for the force at
-a pole.
+'span' is the largest principal value minus the smallest, which can only
+coincide when all three do -- no ordering convention, no branch. 'vzz' and
+'etaq' use the quadrupolar convention |Vzz| >= |Vyy| >= |Vxx|, and etaq
+divides by Vzz, so its gradient is unbounded where the field gradient
+vanishes: a quantity to plot, not to bias.
 """
 
 import torch

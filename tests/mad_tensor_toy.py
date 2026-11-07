@@ -3,19 +3,10 @@
 
     T_i = c(Z_i) I + sum_j fc(r_ij) ( rhat_ij (x) rhat_ij )
 
-with fc the same raised cosine compute mad/property/coord uses. It is a real
-quantity -- the bond-orientational tensor -- but what matters here is that it
-is symmetric, anisotropic, differentiable in closed form and owes nothing to a
-model: a gradient checked through it is a test of MADLIB, not an agreement
-between two copies of the same network.
-
-The per-species diagonal term makes two sites with the same neighbour
-directions different tensors, so a spectrum built from it has more than one
-feature to fit.
-
-    compute t all mad/property/python madlib_models ncomp 6 cutoff 3.0 &
-            config "backend=callable fn=mad_tensor_toy:tensor types=C,O &
-                    quantity=tensor6"
+fc is the raised cosine of compute mad/property/coord. Symmetric, anisotropic,
+differentiable by hand and owing nothing to a model, so a gradient checked
+through it tests MADLIB rather than two copies of one network. The per-species
+diagonal term gives the spectrum more than one feature.
 """
 
 import torch

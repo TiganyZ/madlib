@@ -21,16 +21,14 @@ compute sig all mad/property/python madlib_models ncomp 6 pbc yes &
             config "backend=nequip_nmr parameter=ms quantity=tensor6 model=$MADLIB_NMR_MODELS/ms stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
 
 # 'every' is what makes this affordable: a six-layer network on 300 atoms is
-# the whole cost of a step, and the bias is a slowly varying restraint rather
-# than a force that needs resolving at every femtosecond. gamma ramps from
-# zero so the restraint switches on without kicking the structure.
+# the whole cost of a step, and a restraint this smooth does not need
+# resolving every femtosecond. gamma ramps from zero so it switches on gently.
 fix     si29 si mad/nmr/aniso c_sig target ${target} range -140.0 -60.0 201 &
              sigma 2.0 orientations 512 reference 328.4 &
              gamma 0.0 ${gamma} every ${every} &
              file si29_running.dat write_every 100
 
-# c_pepair, not pe: fix mad/* puts the bias in the potential energy by default,
-# and an energy axis with the bias in it is not the potential's energy.
+# c_pepair, not pe: fix mad/* puts the bias into the potential energy
 compute pepair all pe pair
 
 velocity        all create 300.0 90125 mom yes rot yes dist gaussian

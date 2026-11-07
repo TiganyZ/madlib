@@ -24,6 +24,7 @@ PYTHON_VERSION=3.12
 SI_REFERENCE=328.4
 
 VENV=$PREFIX/venv
+FORK_DIR=$PREFIX/nequip-fork
 MODELS=$PREFIX/models
 RUNS=$PREFIX/runs
 LMP=${LMP:-$PREFIX/lammps/build/lmp}

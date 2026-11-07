@@ -1,12 +1,11 @@
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
 #
-# Predict the 29Si powder lineshape and the 17O quadrupolar parameters of one
-# silica model, and score the lineshape against the DFT one. Nothing is biased
-# here: gamma is zero, which is also how the bias energy scale is sized.
+# The 29Si powder lineshape and the 17O quadrupolar parameters of one silica
+# model, scored against the DFT lineshape. gamma 0: nothing is biased, which is
+# also how the bias energy scale is sized.
 #
-# The model paths come from MADLIB_NMR_MODELS in the environment, not from a
-# LAMMPS variable: LAMMPS does not substitute ${...} inside a quoted argument,
-# and a config string with spaces in it has to be quoted.
+# Model paths come from the environment because LAMMPS does not substitute
+# ${...} inside a quoted argument.
 #
 #   export MADLIB_NMR_MODELS=/path/to/models
 #   lmp -in in.predict -var data silica.data -var target si29_dft.dat
@@ -16,15 +15,13 @@ atom_style      atomic
 boundary        p p p
 read_data       ${data}
 
-# The energy is a classical potential and the observable is a graph network:
-# MADLIB does not care that they come from different decades.
+# a classical potential for the energy, a graph network for the observable
 pair_style      vashishta
 pair_coeff      * * SiO.1990.vashishta Si O
 
 group           si type 1
 
-# One model, three quantities, one forward pass a step: the computes share a
-# loaded model and its cached graph, so only the reduction differs.
+# three quantities, one forward pass a step: same model, same cached graph
 compute sig all mad/property/python madlib_models ncomp 6 pbc yes &
             config "backend=nequip_nmr parameter=ms quantity=tensor6 model=$MADLIB_NMR_MODELS/ms stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
 compute iso all mad/property/python madlib_models ncomp 1 pbc yes &
@@ -32,17 +29,15 @@ compute iso all mad/property/python madlib_models ncomp 1 pbc yes &
 compute spn all mad/property/python madlib_models ncomp 1 pbc yes &
             config "backend=nequip_nmr parameter=ms quantity=span model=$MADLIB_NMR_MODELS/ms stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
 
-# The field gradient model is a second model, so a second forward pass. Vzz is
-# in the model's own units; eta is dimensionless and is a diagnostic, not
-# something to bias on -- its gradient is unbounded where the gradient vanishes.
+# A second model, so a second forward pass. Vzz is in the model's own units;
+# eta is a diagnostic -- its gradient is unbounded where the EFG vanishes.
 compute vzz all mad/property/python madlib_models ncomp 1 pbc yes &
             config "backend=nequip_nmr parameter=efg quantity=vzz model=$MADLIB_NMR_MODELS/efg stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
 compute eta all mad/property/python madlib_models ncomp 1 pbc yes &
             config "backend=nequip_nmr parameter=efg quantity=etaq model=$MADLIB_NMR_MODELS/efg stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
 
-# delta = 328.4 - sigma: the referencing constant belongs to the level of
-# theory the model was fitted at. Check it against your own before trusting an
-# absolute position.
+# delta = 328.4 - sigma. The referencing constant belongs to the level of
+# theory the model was fitted at; check it before trusting an absolute shift.
 fix     si29 si mad/nmr/aniso c_sig target ${target} range -140.0 -60.0 201 &
              sigma 2.0 orientations 1024 reference 328.4 gamma 0.0 &
              file si29_predicted.dat write_every 1

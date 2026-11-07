@@ -382,10 +382,15 @@ references, and a run on 1 rank is checked against a run on 4. Tests needing
 the TurboGAP test data look under `$MADLIB_DATA_ROOT` and skip when it is
 absent.
 
-## Adding a property model
+## Adding a property, or an observable of your own
 
-Implement one method. It returns the forces of a weighted per-atom property,
-$\sum_i \lambda_i q_i$:
+[`docs/ADDING-AN-OBSERVABLE.md`](docs/ADDING-AN-OBSERVABLE.md) — no code if
+your observable is a broadened per-atom scalar, ten lines of Python if your
+model needs a backend, a `fix` if the spectrum itself is new. Plus the traps
+and the test ladder.
+
+A property backend implements one method, the forces of a weighted per-atom
+property $\sum_i \lambda_i q_i$:
 
 ```cpp
 virtual void adjoint(double **lambda, double *virial);

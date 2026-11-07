@@ -4,23 +4,18 @@
 
     make_inputs.py <aSiO2_models.xyz> <outdir> [frame] [reference ppm]
 
-Writes, into outdir:
-
-    silica.data           the structure, LAMMPS data, type 1 = Si, 2 = O
-    silica_rattled.data   the same with every atom displaced, which is what
-                          the biased run starts from
-    si29_dft.dat          the 29Si static powder lineshape of the DFT
-                          shielding tensors in the file -- the 'experiment'
+    silica.data           type 1 = Si, 2 = O
+    silica_rattled.data   every atom displaced: what the biased run starts from
+    si29_dft.dat          the 29Si powder lineshape of the file's DFT tensors,
+                          which is the 'experiment'
     si29_ml_in_file.dat   the same from the file's own ML prediction, which is
-                          what the bias can be expected to reach
+                          as close as the bias can get
 
 The lineshape is the one fix mad/nmr/aniso predicts: a Gaussian per
-crystallite orientation at omega = n . T . n, averaged over a golden-spiral
-hemisphere grid, mapped onto a shift axis by delta = sigma_ref - sigma. The
-file carries both QM_ms (DFT, the reference) and ML_ISD_ms (the model's own
-prediction), so the gap between the last two files is the model's error and
-not something MADLIB can close.
+crystallite orientation at omega = n . T . n over a golden-spiral hemisphere
+grid, on a shift axis, delta = sigma_ref - sigma.
 """
+
 import sys
 
 import numpy as np

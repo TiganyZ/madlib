@@ -3,24 +3,19 @@
 
     "backend=mace model=cebe.model types=C,O quantity=scalar"
 
-Whitespace or ';' between keys, '=' inside them. A key the backend does not
-know is an error: a config is the only thing standing between a deck and the
-wrong model, and a mistyped 'quantitiy=span' that falls back to a default
-produces a spectrum rather than a complaint.
+Whitespace or ';' between keys. An unknown key is an error: a mistyped
+'quantitiy=span' that fell back to a default would produce a spectrum rather
+than a complaint.
 
 'file=models.json entry=cebe' reads the keys from a JSON file instead, for a
-config too long to want in the deck; keys given in the string override the
-file's. The file is {entry: {key: value}}.
+config too long for the deck; keys in the string override the file's.
 
 LAMMPS DOES NOT SUBSTITUTE ${var} INSIDE A QUOTED ARGUMENT, and a config with
-spaces in it has to be quoted, so a model path cannot come from a LAMMPS
-variable: what arrives is the literal text ${var}. Every value here is
-therefore passed through expandvars and expanduser, so
+spaces must be quoted, so a model path cannot come from a LAMMPS variable --
+the literal text ${var} arrives. Every value is therefore passed through
+expandvars and expanduser:
 
     config "backend=mace model=$MACE_MODELS/cebe.model types=C,O"
-
-takes the path from the environment, which LAMMPS never touches. An absolute
-path and the file=/entry= route both work as they stand.
 """
 
 import json
