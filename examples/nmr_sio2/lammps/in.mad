@@ -1,0 +1,47 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# Molecular augmented dynamics on a 29Si powder lineshape: the potential keeps
+# the glass a glass, the lineshape decides which glass.
+#
+#   export MADLIB_NMR_MODELS=/path/to/models
+#   lmp -in in.mad -var data silica_rattled.data -var target si29_dft.dat \
+#       -var gamma 200.0 -var every 5 -var steps 2000
+
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       ${data}
+
+pair_style      vashishta
+pair_coeff      * * SiO.1990.vashishta Si O
+
+group           si type 1
+
+compute sig all mad/property/python madlib_models ncomp 6 pbc yes &
+            config "backend=nequip_nmr parameter=ms quantity=tensor6 model=$MADLIB_NMR_MODELS/ms stats=$MADLIB_NMR_MODELS/data_mean_std.json types=Si,O"
+
+# 'every' is what makes this affordable: a six-layer network on 300 atoms is
+# the whole cost of a step, and the bias is a slowly varying restraint rather
+# than a force that needs resolving at every femtosecond. gamma ramps from
+# zero so the restraint switches on without kicking the structure.
+fix     si29 si mad/nmr/aniso c_sig target ${target} range -140.0 -60.0 201 &
+             sigma 2.0 orientations 512 reference 328.4 &
+             gamma 0.0 ${gamma} every ${every} &
+             file si29_running.dat write_every 100
+
+# c_pepair, not pe: fix mad/* puts the bias in the potential energy by default,
+# and an energy axis with the bias in it is not the potential's energy.
+compute pepair all pe pair
+
+velocity        all create 300.0 90125 mom yes rot yes dist gaussian
+fix             nve all nve
+fix             thm all langevin 300.0 300.0 0.1 90125
+
+thermo_style    custom step temp c_pepair f_si29 f_si29[2] f_si29[3] f_si29[4] press
+thermo_modify   format float %.8g flush yes
+thermo          50
+
+timestep        0.001
+run             ${steps}
+
+write_data      biased.data
