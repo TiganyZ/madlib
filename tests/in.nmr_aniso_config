@@ -1,0 +1,14 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# A config string handed to a module that cannot read one would leave the
+# model on its import-time default and still return numbers.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+compute q all mad/property/python mad_torch_coord ncomp 1 cutoff 3.0 &
+          config "backend=callable fn=mad_tensor_toy:tensor"
+run 0

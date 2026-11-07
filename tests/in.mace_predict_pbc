@@ -1,0 +1,18 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The same values from the other geometry: one periodic cell handed to the
+# model, which builds its own graph. One rank, by construction.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute q all mad/property/python madlib_models ncomp 1 pbc yes &
+          config "backend=mace model=_mace_toy.model types=C,O"
+dump      d all custom 1 mace_q_pbc.dump id c_q
+dump_modify d format float %.17g sort id
+run 0

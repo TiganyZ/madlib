@@ -1,0 +1,15 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# A scalar property has no orientation dependence; reading one as a tensor
+# would be six atoms' worth of values per spectrum point.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+compute q   all mad/property/coord cutoff 1.7 2.1
+fix     mad all mad/nmr/aniso c_q target data/nmr_aniso_target.dat &
+            range 75.0 95.0 101 convention shift gamma 1.0
+run 0

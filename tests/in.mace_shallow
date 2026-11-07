@@ -1,0 +1,19 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The same two-layer model as in.mace_predict with a 2.5 A cutoff instead of
+# 4 A. The values must be identical to the last bit: edges end on owned atoms
+# only, so a ghost never passes a message on and the extra shell is unused.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute q all mad/property/python madlib_models ncomp 1 cutoff 2.5 &
+          config "backend=mace model=_mace_toy.model types=C,O ghost_check=no"
+dump      d all custom 1 mace_shallow.dump id c_q
+dump_modify d format float %.17g sort id
+run 0

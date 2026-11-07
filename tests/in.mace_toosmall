@@ -1,0 +1,18 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# A cutoff shorter than the model's own graph: the edges it was fitted with
+# are not all there, which is an error rather than a slightly different number.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute q all mad/property/python madlib_models ncomp 1 cutoff 1.5 &
+          config "backend=mace model=_mace_toy.model types=C,O"
+dump      d all custom 1 mace_toosmall.dump id c_q
+dump_modify d format float %.17g sort id
+run 0

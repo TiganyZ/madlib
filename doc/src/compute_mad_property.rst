@@ -50,9 +50,11 @@ Syntax
 
        *mad/property/python* args = module keyword values
          module = name of an importable Python module
-         *ncomp* value = 1 or 3 = components of the property
+         *ncomp* value = components of the property: 1 for a scalar, 3 for a
+           dipole, 6 for a symmetric tensor in Voigt order
          *cutoff* value = neighbor list cutoff (distance units)
          *pbc* value = *yes* to pass one periodic cell instead of a ghost cloud
+         *config* value = a string passed to the module's mad_bind()
 
        *mad/property/table*:
          *values* = one value per atom type
@@ -73,6 +75,10 @@ Examples
    compute cn   all mad/property/coord cutoff 1.7 2.1
    compute q    all mad/property/table file cebe.dat
    compute qml  all mad/property/python my_mace_model ncomp 1 cutoff 5.0
+   compute cebe all mad/property/python madlib_models ncomp 1 cutoff 12.0 &
+                config "backend=mace model=cebe.model types=C,O"
+   compute sig  all mad/property/python madlib_models ncomp 6 pbc yes &
+                config "backend=nequip_nmr parameter=ms quantity=tensor6 model=MS/minimal types=Si,O stats=stats.json"
    compute qia  all mad/property/mliap model linear cebe.model descriptor sna cebe.descriptor
 
 Description
@@ -172,6 +178,42 @@ with *q* of shape (nlocal,) or (nlocal, ncomp), and *f* the negative gradient of
 the weighted sum of *q* -- one backward pass for a torch model.  Arrays cross as
 memoryviews over LAMMPS's own storage and nothing is copied.
 
+A module configured only by its import can serve one model and one quantity per
+run, which is a poor fit for a deck that wants a model's binding energies *and*
+its dipoles.  So a module may instead provide
+
+.. code-block:: python
+
+   mad_bind(config) -> (compute_fn, adjoint_fn)
+
+where *config* is the string given to the *config* keyword and the two returned
+callables have the signatures above.  Each compute binds separately and gets its
+own closed-over state.  A *config* string handed to a module without
+``mad_bind`` is an error, not an ignored argument: a model left on its
+import-time default still returns numbers.
+
+The MADLIB repository ships such a module, ``madlib_models`` in ``python/``,
+which is the general bridge from a machine-learned model to an observable: it
+loads the model, runs it on the geometry LAMMPS hands over, reduces its output
+to the quantity the observable wants, and differentiates.  Core-electron
+binding energies from a MACE model into :doc:`fix mad/xps <fix_mad>`, a dipole
+into :doc:`fix mad/ir <fix_mad_ir>`, a shielding tensor into
+:doc:`fix mad/nmr/aniso <fix_mad>`, all without writing a line of Python:
+
+.. code-block:: LAMMPS
+
+   compute cebe all mad/property/python madlib_models ncomp 1 cutoff 12.0 &
+               config "backend=mace model=cebe.model types=C,O"
+
+Its keys are *backend* (*mace*, *nequip_nmr* or *callable*), *model*, *types*
+-- the element of each LAMMPS atom type -- *output*, which of the model's
+outputs to read, *quantity*, how to reduce it (*scalar*, *vector*, *tensor6*,
+*iso*, *span*, *vzz*, *etaq*, *component:zz*), and *scale*/*shift* for a unit
+or sign convention.  Models are cached by what identifies them, so two
+computes over one model -- an isotropic shielding and the span of the same
+tensor -- cost one forward pass per step and two backward passes.  The package
+docstring lists the rest.
+
 There are two ways the module can be told where the atoms are, and *cell* says
 which it has been given.  By default *cell* is nine zeros, the positions cover
 owned atoms **and their ghosts** -- each ghost carrying the position of the
@@ -182,6 +224,17 @@ for ghosts are communicated back to their owners.  This is the general case and
 the only one that runs under MPI.  Its *cutoff* must reach the model's whole
 interaction range, which for a message-passing model is the neighbor-list cutoff
 times the number of layers, and the communication cutoff must cover that.
+
+.. warning::
+
+   Even then it is exact only for a model that passes **one** message.  LAMMPS
+   builds neighbor lists for owned atoms, so every edge handed over ends on an
+   owned atom and a ghost receives no messages of its own.  A second layer
+   therefore reads an incomplete feature for every neighbor that is a ghost.
+   Measured on a 91-atom cell with a two-layer MACE at *r_max* 2 Angstrom and a
+   4 Angstrom shell, the error is 6e-4 eV per atom; the same model with one
+   layer agrees with MACE's own pipeline to 4e-16.  *pbc yes* has no such
+   error, because there the model builds its own graph.
 
 With *pbc yes*, *cell* holds the three cell vectors, the positions are the owned
 atoms only, and a model that handles periodicity itself is left to.  This is for

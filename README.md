@@ -85,15 +85,17 @@ follow during a run.
 | `mad/xrd` | X-ray or neutron diffraction |
 | `mad/xps` | XPS, or any spectrum made by broadening a per-atom scalar |
 | `mad/nmr` | NMR, per nucleus |
+| `mad/nmr/aniso` | a static powder NMR lineshape, from shielding **tensors** |
 | `mad/ir` | IR, from the dipole autocorrelation of a running trajectory |
 
-**Per-atom property backends** — what `mad/xps`, `mad/nmr` and `mad/ir` read
-their input from. Any of these, through one interface:
+**Per-atom property backends** — what `mad/xps`, `mad/nmr`, `mad/nmr/aniso`
+and `mad/ir` read their input from. Any of these, through one interface:
 
 | compute | source |
 |---|---|
 | `mad/property/turbogap` | a TurboGAP GPR model in a `.gap` file |
 | `mad/property/python` | any Python or torch model (MACE, GRACE, ...) |
+| ↳ [`madlib_models`](python/README.md) | that model named in the deck, with no Python to write |
 | `mad/property/mliap` | a LAMMPS ML-IAP model |
 | `mad/property/dipole` | fixed or per-atom charges |
 | `mad/property/coord` | coordination number |
@@ -107,6 +109,26 @@ also adds one of its own:
 | `turbogap` | a whole [TurboGAP](https://turbogap.fi) potential, `.gap` file as it stands |
 | anything in LAMMPS | `symmetrix/mace`, `quip`, `pace`, `eam`, ... |
 | `zero` | no potential at all — classical RMC, the data on its own |
+
+**Any machine-learned property, into any observable.** The quantity between a
+structure and a spectrum is one per-atom number — a core-electron binding
+energy for XPS, a dipole for IR, a chemical shielding for NMR — and
+[`madlib_models`](python/README.md) is the bridge from a model that predicts
+one to the fix that reads it. Nothing to write:
+
+```lammps
+compute cebe all mad/property/python madlib_models ncomp 1 cutoff 12.0 &
+            config "backend=mace model=cebe.model types=C,O"
+fix     xps  all mad/xps c_cebe target measured.dat range 280 300 201 gamma 5.0
+```
+
+`backend=mace` takes any MACE model's per-atom output: `node_energy` for a
+model fitted to a per-atom target, `atomic_dipoles` or `charges` from a dipole
+model. `backend=nequip_nmr` takes the anisotropic NMR parameter models of
+[Ben Mahmoud *et al.*](https://github.com/cbenmahm/anistropic-nmr-parameters-data) —
+shielding and electric field gradient tensors — and `quantity=` reduces a
+tensor to whatever the observable wants: `iso`, `span`, `vzz`, `etaq`, or the
+six Voigt components `fix mad/nmr/aniso` broadens into a powder lineshape.
 
 Also: structure search with a genetic algorithm that uses MAD as its local
 optimiser — see [`python/`](python/README.md).
@@ -346,6 +368,7 @@ echo "binary: $PREFIX/lammps/build/lmp"
 |---|---|
 | [`examples/mace_foundation`](examples/mace_foundation/README.md) | a MACE foundation model under an experimental bias — the smallest useful MAD run with a machine-learned potential |
 | [`examples/method_comparison`](examples/method_comparison/README.md) | MAD, HRMC and a genetic algorithm on one target at a matched budget of potential evaluations |
+| [`examples/nmr_sio2`](examples/nmr_sio2/README.md) | amorphous silica against a <sup>29</sup>Si powder lineshape, from a published NMR tensor model — a classical potential for the energy, a graph network for the observable |
 
 ## Tests
 

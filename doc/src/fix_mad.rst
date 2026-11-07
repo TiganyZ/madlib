@@ -3,6 +3,7 @@
 .. index:: fix mad/xrd
 .. index:: fix mad/xps
 .. index:: fix mad/nmr
+.. index:: fix mad/nmr/aniso
 
 fix mad/pdf command
 ===================
@@ -19,6 +20,9 @@ fix mad/xps command
 fix mad/nmr command
 ===================
 
+fix mad/nmr/aniso command
+=========================
+
 Syntax
 """"""
 
@@ -27,7 +31,8 @@ Syntax
    fix ID group-ID style compute-ID keyword values ...
 
 * ID, group-ID are documented in :doc:`fix <fix>` command
-* style = *mad/pdf* or *mad/sq* or *mad/xrd* or *mad/xps* or *mad/nmr*
+* style = *mad/pdf* or *mad/sq* or *mad/xrd* or *mad/xps* or *mad/nmr* or
+  *mad/nmr/aniso*
 * compute-ID = ID of the :doc:`compute mad/pdf <compute_mad_pdf>` or
   :doc:`compute mad/property <compute_mad_property>` command that supplies the
   prediction
@@ -63,16 +68,19 @@ Syntax
          *lp* value = *yes* or *no* = powder Lorentz-polarization factor
          *polarization* value = degree of polarization P of the incident beam
 
-       *mad/xps* and *mad/nmr*:
+       *mad/xps*, *mad/nmr* and *mad/nmr/aniso*:
          *energy* (or *range*) values = min max nsamples
          *sigma* value = broadening width of each per-atom value
          *norm* value = *l2* or *area* or *none*
          *trunc* value = drop Gaussian tails past this many sigma
 
-       *mad/nmr* only, and one of the two is required:
+       *mad/nmr* and *mad/nmr/aniso*, and one of the two is required:
          *reference* value = a = convert a shielding to a shift, delta = a - sigma
          *slope* value = b = use delta = a - b sigma instead
          *convention* value = *shift* = the property is already on the target's axis
+
+       *mad/nmr/aniso* only:
+         *orientations* value = N = crystallite orientations in the powder average
 
 Examples
 """"""""
@@ -91,6 +99,14 @@ Examples
    compute cs all mad/property/python mad_shiftml ncomp 1 pbc yes
    fix h1 protons all mad/nmr c_cs target h1.dat range 0 20 201 sigma 0.5 &
                               reference 30.96 gamma 50.0
+
+   group   si all type 1
+   compute sig all mad/property/python madlib_models ncomp 6 pbc yes &
+               config "backend=nequip_nmr parameter=ms quantity=tensor6 &
+                       model=models/MS/final/isd/minimal types=Si,O &
+                       stats=data_mean_std.json"
+   fix si29 si all mad/nmr/aniso c_sig target si29.dat range -140 -80 201 &
+                   sigma 2.0 orientations 1024 reference 328.4 gamma 20.0
 
 Description
 """""""""""
@@ -168,6 +184,52 @@ prediction from the same model -- as in a test, or a structure search against a
 reference structure's computed spectrum -- both sides are shieldings and
 *convention shift* is the honest setting.
 
+*mad/nmr/aniso* fits a **static powder lineshape**, which is what a shielding
+tensor buys over its trace.  *mad/nmr* broadens one number per nucleus, so
+every site enters the spectrum as a symmetric peak and the anisotropy of its
+environment is discarded before the comparison.  A static powder spectrum is
+that anisotropy: a crystallite whose field direction is :math:`\mathbf{n}`
+resonates at
+
+.. math::
+
+   \omega_i(\mathbf{n}) = \mathbf{n} \cdot \mathbf{T}_i \cdot \mathbf{n}
+
+and the spectrum is that over all orientations, which is a skewed lineshape
+with edges at the principal values rather than a peak at their mean.  Two
+sites with the same isotropic shielding and different tensors are then two
+different patterns.
+
+The property it reads is a **symmetric tensor in Voigt order**, so the compute
+must have *ncomp* 6 and its six components must be
+
+.. parsed-literal::
+
+   T_xx  T_yy  T_zz  T_xy  T_xz  T_yz
+
+with no factor of two folded into the off-diagonal ones.  An NMR experiment
+cannot see the antisymmetric part of the tensor to first order, so a model
+predicting a general rank-2 tensor should symmetrise it; the *quantity*
+*tensor6* of the :doc:`madlib_models <compute_mad_property>` bridge does
+exactly that.  Nothing in the fix diagonalises anything -- the orientation
+average needs no principal values, no ordering convention and no eigenvalue
+derivatives, so there is no branch for a degenerate site to cross.
+
+**Orientations are a convergence parameter.**  A powder pattern has edges at
+the principal values, and too coarse a quadrature resolves them into a comb of
+Gaussians which is smooth enough to look like a spectrum.  The default grid is
+a golden spiral over the hemisphere -- a hemisphere because
+:math:`\omega(\mathbf{n}) = \omega(-\mathbf{n})` -- and the check is to raise
+*orientations* until the lineshape stops moving at the *sigma* in use.
+
+There is a second, sharper way to see the same thing.  An exact powder average
+cannot depend on how the sample is oriented, so it exerts no torque; a finite
+grid does, and the leftover appears as an antisymmetric part of
+:math:`\sum_i \mathbf{r}_i \otimes \mathbf{f}_i`.  The reported stress is
+its symmetric half, and the asymmetry falls as :math:`1/N` -- 2 percent of the
+shear at 48 orientations, 0.1 percent at 3072 in the package's own test.  If a
+run's angular momentum drifts, that number is why.
+
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -220,4 +282,5 @@ For *mad/pdf*, *output* = pdf.  For *mad/sq*, *weighting* = sq and *output* =
 raw; for *mad/xrd*, *weighting* = xray and *output* = q\*F(q); for both,
 *units* = q, *window* = lorch, *lp* = no, *polarization* = 1.0 and
 *wavelength* = 1.5405981.  For *mad/xps*, *sigma* = 0.4, *norm* = l2 and
-*trunc* = 8.0.
+*trunc* = 8.0.  For *mad/nmr/aniso*, *sigma* = 1.0, *orientations* = 512,
+*norm* = l2 and *trunc* = 8.0.

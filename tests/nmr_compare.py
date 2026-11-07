@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
-"""Two c_cs dumps agree. Used for the ghost-cluster route against the cell one.
+"""Two one-value-per-atom dumps agree. The ghost-cluster route against the cell one.
 
-    nmr_compare.py <a.dump> <b.dump> <tolerance ppm>
+    nmr_compare.py <a.dump> <b.dump> <tolerance>
+
+The value column is whichever one is not the atom id, so it does not matter
+what the compute in the deck was called.
 """
 import sys
 
@@ -15,7 +18,10 @@ def read(path):
     col = {k: i for i, k in enumerate(head)}
     rows = [l.split() for l in txt.split("ITEM: ATOMS")[1].split("\n")[1:] if l.strip()]
     rows.sort(key=lambda r: int(r[col["id"]]))
-    return np.array([float(r[col["c_cs"]]) for r in rows])
+    value = [k for k in head if k != "id"]
+    if len(value) != 1:
+        raise SystemExit(f"{path}: expected one value column beside id, found {value}")
+    return np.array([float(r[col[value[0]]]) for r in rows])
 
 
 a, b, tol = read(sys.argv[1]), read(sys.argv[2]), float(sys.argv[3])

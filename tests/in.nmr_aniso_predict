@@ -1,0 +1,25 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The static powder lineshape of the toy tensor property, with the tensors it
+# was built from, so an independent computation can be compared with both.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+
+compute t   all mad/property/python madlib_models ncomp 6 cutoff 3.0 &
+            config "backend=callable fn=mad_tensor_toy:tensor types=C,O quantity=tensor6"
+fix     mad all mad/nmr/aniso c_t target data/nmr_aniso_target.dat &
+            range 75.0 95.0 101 sigma 0.5 orientations 48 &
+            reference 100.0 slope 1.0 gamma 0.0 fit no no &
+            file nmr_aniso_spec.dat write_every 1
+
+dump            d all custom 1 nmr_aniso_t.dump id c_t[1] c_t[2] c_t[3] c_t[4] c_t[5] c_t[6]
+dump_modify     d format float %.17g sort id
+thermo_style    custom step f_mad f_mad[2] f_mad[3]
+thermo_modify   format float %.17g
+run 0

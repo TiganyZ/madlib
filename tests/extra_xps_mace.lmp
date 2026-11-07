@@ -1,0 +1,7 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+# A MACE per-atom energy read as a core-electron binding energy: the chain
+# MADLIB needs for XPS, with the model's own backward pass as its adjoint.
+compute cebe all mad/property/python madlib_models ncomp 1 cutoff 4.0 &
+             config "backend=mace model=_mace_toy.model types=C,O scale=-1.0"
+fix     mad  all mad/xps c_cebe target data/xps_target.dat energy 0.0 5.0 201 &
+             sigma 0.25 gamma 50.0

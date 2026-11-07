@@ -160,21 +160,30 @@ leg() { printf '\n=== %s ===\n' "$1"; }
 ok()  { echo "    PASS: $1"; }
 bad() { echo "    FAIL: $1"; fail=1; }
 
-want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir irgradient irbias dipolemodel quip torch mliap nmr}
+want=${*:-forward gradients invariants mpi guards md mc xps gap pair pairvirial newton kk pairmd pairmpi pairgpu soapbasis soapdesc soapgpu soappredict soapbatch soapswap ir irgradient irbias dipolemodel quip torch mliap nmr nmraniso mlprop}
 
 for w in $want; do
 case $w in
 
 forward)
-  leg "forward g(r) against an independent numpy reference"
-  $LMP -in in.pdf -log none >/dev/null 2>&1
-  if $PYTHON pdf_reference.py "$XYZ" gr_lammps.dat; then ok "partial g_ab(r)"; else bad "partial g_ab(r)"; fi
+  # Both references read the frame from the turbogap_tests data repository.
+  # Without it they fail on a missing file, which reads as a broken g(r);
+  # every other leg needing that data skips, and so does this one now.
+  if ! have "$XYZ"; then
+    leg "forward g(r) and XPS against an independent numpy reference"
+    echo "    SKIP: $XYZ is absent (set MADLIB_DATA_ROOT)"
+  else
+    leg "forward g(r) against an independent numpy reference"
+    $LMP -in in.pdf -log none >/dev/null 2>&1
+    if $PYTHON pdf_reference.py "$XYZ" gr_lammps.dat; then ok "partial g_ab(r)"
+    else bad "partial g_ab(r)"; fi
 
-  leg "forward coordination and XPS spectrum against the same"
-  $LMP -in in.xps0 -log none >/dev/null 2>&1
-  if $PYTHON xps_reference.py "$XYZ" cn.dump xps_pred.dat; then
-    ok "per-atom property and broadened spectrum"
-  else bad "per-atom property and broadened spectrum"; fi
+    leg "forward coordination and XPS spectrum against the same"
+    $LMP -in in.xps0 -log none >/dev/null 2>&1
+    if $PYTHON xps_reference.py "$XYZ" cn.dump xps_pred.dat; then
+      ok "per-atom property and broadened spectrum"
+    else bad "per-atom property and broadened spectrum"; fi
+  fi
   ;;
 
 gradients)
@@ -531,6 +540,167 @@ PY
     if $LMP -in in.ir_guard -log none 2>&1 | grep -q "not defined in a periodic box"; then
       ok "a periodic box without molecules is an error, not a plausible spectrum"
     else bad "a periodic sum q_i r_i was accepted"; fi
+  fi
+  ;;
+
+mlprop)
+  leg "any MACE model's per-atom output as a property, and an XPS bias on it"
+  # A MACE environment is its own: mace pins e3nn 0.4.4 and the NMR tensor
+  # models want a later one, so this leg takes the interpreter's packages from
+  # MADLIB_MACE_SITE if it is set -- one venv per model family, and
+  # PYTHONPATH is what the embedded interpreter goes by.
+  MACE_SITE=${MADLIB_MACE_SITE:-}
+  export PYTHONPATH="$PWD:$PWD/../python${MACE_SITE:+:$MACE_SITE}${PYTHONPATH:+:$PYTHONPATH}"
+  MACE_PY=${MADLIB_MACE_PYTHON:-$PYTHON}
+  # e3nn 0.4.4 loads its Wigner tables with a bare torch.load, which torch 2.6
+  # refuses by default.
+  export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1
+  if ! $LMP -h 2>/dev/null | grep -q "mad/property/python"; then
+    echo "    SKIP: built without the embedded interpreter"
+  elif ! $MACE_PY -c "import mace, torch" 2>/dev/null; then
+    echo "    SKIP: mace-torch is not installed (set MADLIB_MACE_PYTHON and MADLIB_MACE_SITE)"
+  else
+    $MACE_PY make_mace_toy.py _mace_toy.model 2 >/dev/null 2>&1
+    $MACE_PY make_mace_toy.py _mace_one.model 1 >/dev/null 2>&1
+
+    echo "  -- one periodic cell, against MACE's own data pipeline"
+    $LMP -in in.mace_predict_pbc -log none >/dev/null 2>&1
+    if $MACE_PY mace_reference.py mace_q_pbc.dump data/gc91.data _mace_toy.model 1e-10; then
+      ok "the graph MADLIB builds is the one MACE would have built"
+    else bad "the pbc route disagrees with MACE's own pipeline"; fi
+
+    echo "  -- a ghost cloud, one message: the same values, exactly"
+    $LMP -in in.mace_one -log none >/dev/null 2>&1
+    if $MACE_PY mace_reference.py mace_one.dump data/gc91.data _mace_one.model 1e-10; then
+      ok "a one-pass model on a ghost cloud is exact"
+    else bad "the ghost route is wrong even for a one-pass model"; fi
+
+    echo "  -- a ghost cloud, two messages: approximate, and by how much"
+    $LMP -in in.mace_predict -log none >/dev/null 2>&1
+    # A ghost receives no messages, because LAMMPS lists the neighbours of
+    # owned atoms only, so a second layer reads an incomplete feature for every
+    # neighbour that is a ghost. The size of that is the point of the number.
+    if $MACE_PY mace_reference.py mace_q.dump data/gc91.data _mace_toy.model 5e-3; then
+      ok "the truncation is where the header says it is"
+    else bad "the two-layer ghost route is further off than documented"; fi
+
+    echo "  -- a deeper ghost shell changes nothing, and a shallower one errors"
+    $LMP -in in.mace_shallow -log none >/dev/null 2>&1
+    if $MACE_PY nmr_compare.py mace_q.dump mace_shallow.dump 1e-14; then
+      ok "4 A and 2.5 A of ghosts give the same values: the shell is not what is missing"
+    else bad "the ghost shell depth changed the values"; fi
+    if $LMP -in in.mace_toosmall -log none 2>&1 | grep -q "missing edges it was fitted with"; then
+      ok "a cutoff shorter than r_max is an error"
+    else bad "a cutoff shorter than the model's own graph was accepted"; fi
+
+    echo "  -- the XPS bias on it, by finite differences"
+    if $MACE_PY fd_gradient.py data/gc91.data extra_xps_mace.lmp --lmp "$LMP" \
+         --atoms 2 --hs 1e-3,3e-4,1e-4 --paircut 7.5 >/tmp/fd_mace.log 2>&1; then
+      grep -E "ratio|observed order|analytic W" /tmp/fd_mace.log | sed 's/^/     /'
+      ok "MACE's backward pass is the force MADLIB needs"
+    else
+      sed 's/^/     /' /tmp/fd_mace.log | tail -16
+      bad "the MACE adjoint is wrong"
+    fi
+  fi
+  ;;
+
+nmraniso)
+  leg "a static powder NMR lineshape, from per-atom shielding tensors"
+  if ! $LMP -h 2>/dev/null | grep -q "mad/nmr/aniso"; then
+    echo "    SKIP: built without fix mad/nmr/aniso"
+  elif ! $LMP -h 2>/dev/null | grep -q "mad/property/python"; then
+    echo "    SKIP: built without the embedded interpreter"
+  elif ! $PYTHON -c "import torch" 2>/dev/null; then
+    echo "    SKIP: torch not installed"
+  else
+    # the toy tensor module, and the madlib_models package it is driven through
+    export PYTHONPATH="$PWD:$PWD/../python${PYTHONPATH:+:$PYTHONPATH}"
+    bash data/make_nmr_aniso_target.sh >/dev/null
+
+    echo "  -- the orientation average, against an independent computation"
+    $LMP -in in.nmr_aniso_predict -log none >/dev/null 2>&1
+    if $PYTHON nmr_aniso_reference.py nmr_aniso_t.dump nmr_aniso_spec.dat 0.5 48 100.0 1.0 1e-10
+    then ok "the lineshape is the powder average of the tensors"
+    else bad "the lineshape is not the powder average of the tensors"; fi
+
+    echo "  -- forces and virial against finite differences of the bias energy"
+    if $PYTHON fd_gradient.py data/gc91.data extra_nmr_aniso.lmp --lmp "$LMP" \
+         --atoms 2 --hs 1e-3,3e-4,1e-4 --paircut 7.5 >/tmp/fd_nmr_aniso.log 2>&1; then
+      grep -E "ratio|observed order|analytic W" /tmp/fd_nmr_aniso.log | sed 's/^/     /'
+      ok "the tensor adjoint gives the right force and virial"
+    else
+      sed 's/^/     /' /tmp/fd_nmr_aniso.log | tail -16
+      bad "the tensor adjoint is wrong"
+    fi
+
+    echo "  -- invariants"
+    out=$($LMP -in in.nmr_aniso_inv -log none 2>&1 | grep -A2 '^   Step' | sed -n 2p)
+    $PYTHON - "$out" <<'INV'
+import sys
+f = sys.argv[1].split()
+E, D = float(f[1]), float(f[3])
+net = max(abs(float(f[4])), abs(float(f[5])), abs(float(f[6])))
+bad = 0
+half = 0.5 * 100.0 * D
+if abs(E - half) > 1e-9 * max(abs(E), 1.0):
+    print(f"    FAIL: E != gamma D / 2  ({E} vs {half})"); bad = 1
+else:
+    print(f"    PASS: E = gamma D / 2   ({E:.10g})")
+if net > 1e-9:
+    print(f"    FAIL: net bias force {net:.3e}"); bad = 1
+else:
+    print(f"    PASS: sum of bias forces = {net:.3e}")
+sys.exit(bad)
+INV
+    [ $? -eq 0 ] || fail=1
+
+    echo "  -- 1 rank against $RANKS ranks, at step 0 and after ten MD steps"
+    $LMP -in in.nmr_aniso_inv -log none 2>&1 | grep -A2 '^   Step' | sed -n 2p \
+        > /tmp/mad_aniso_1.txt
+    mpirun $MPIRUN_EXTRA --oversubscribe -np "$RANKS" $LMP -in in.nmr_aniso_inv -log none 2>&1 \
+        | grep -A2 '^   Step' | sed -n 2p > /tmp/mad_aniso_n.txt
+    $LMP -in in.nmr_aniso_md -log none 2>&1 | grep -A2 '^   Step' | sed -n 3p \
+        > /tmp/mad_aniso_md1.txt
+    mpirun $MPIRUN_EXTRA --oversubscribe -np "$RANKS" $LMP -in in.nmr_aniso_md -log none 2>&1 \
+        | grep -A2 '^   Step' | sed -n 3p > /tmp/mad_aniso_mdn.txt
+    $PYTHON - <<'RANKS_CMP'
+import sys
+def compare(fa, fb, names, label):
+    a, b = open(fa).read().split(), open(fb).read().split()
+    bad = 0
+    for n, x, y in zip(names, a, b):
+        if n == "step":
+            continue
+        x, y = float(x), float(y)
+        # the force sums are zero by construction; a relative test on two
+        # numbers near 1e-13 says nothing
+        if n.startswith("f_sum"):
+            d, tol, kind = max(abs(x), abs(y)), 1e-9, "abs"
+        else:
+            d, tol, kind = abs(x - y) / max(abs(x), 1e-12), 1e-10, "rel"
+        if d >= tol:
+            bad = 1
+        print(f"    {'PASS' if d < tol else 'FAIL'}: {label} {n:10s} {kind} {d:.2e}")
+    return bad
+step0 = ["step", "E", "rel_error", "dissim", "f_sumx", "f_sumy", "f_sumz", "vir_xx", "vir_xy"]
+after = ["step", "E", "rel_error", "dissim", "vir_xx", "vir_xy"]
+bad = compare('/tmp/mad_aniso_1.txt', '/tmp/mad_aniso_n.txt', step0, "step0 ")
+bad |= compare('/tmp/mad_aniso_md1.txt', '/tmp/mad_aniso_mdn.txt', after, "step10")
+sys.exit(bad)
+RANKS_CMP
+    [ $? -eq 0 ] || fail=1
+
+    echo "  -- the guards"
+    if $LMP -in in.nmr_aniso_guard -log none 2>&1 | grep -q "convention stated"; then
+      ok "a missing convention is an error, not a mirrored lineshape"
+    else bad "fix mad/nmr/aniso ran without being told shielding or shift"; fi
+    if $LMP -in in.nmr_aniso_ncomp -log none 2>&1 | grep -q "6-component"; then
+      ok "a scalar property is refused rather than read as a tensor"
+    else bad "fix mad/nmr/aniso accepted a property of the wrong width"; fi
+    if $LMP -in in.nmr_aniso_config -log none 2>&1 | grep -q "no mad_bind"; then
+      ok "a config string a module cannot read is an error"
+    else bad "a config string was accepted and ignored"; fi
   fi
   ;;
 

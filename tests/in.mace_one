@@ -1,0 +1,21 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# The control for in.mace_predict: one message instead of two, where a ghost
+# cloud of 2 A IS the whole environment of every owned atom, so agreement with
+# MACE's own pipeline is exact and a disagreement in the two-layer case can
+# only be the ghosts' missing edges.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+neighbor        0.5 bin
+comm_modify     cutoff 5.0
+
+compute q all mad/property/python madlib_models ncomp 1 cutoff 2.5 &
+          config "backend=mace model=_mace_one.model types=C,O"
+dump      d all custom 1 mace_one.dump id c_q
+dump_modify d format float %.17g sort id
+run 0

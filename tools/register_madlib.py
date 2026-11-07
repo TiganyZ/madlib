@@ -23,8 +23,9 @@ KOKKOS_FILES = ["pair_turbogap_kokkos.h", "pair_turbogap_kokkos.cpp", "mad_neigh
 
 PAIR_STYLES = [("turbogap", "pair_turbogap"), ("turbogap/kk", "pair_turbogap_kokkos")]
 
-FIX_STYLES = [("mad/ir", "fix_mad_ir"), ("mad/pdf", "fix_mad"), ("mad/sq", "fix_mad"),
-              ("mad/xps", "fix_mad"), ("mad/xrd", "fix_mad")]
+FIX_STYLES = [("mad/ir", "fix_mad_ir"), ("mad/nmr", "fix_mad"),
+              ("mad/nmr/aniso", "fix_mad"), ("mad/pdf", "fix_mad"), ("mad/sq", "fix_mad"),
+              ("mad/spectrum", "fix_mad"), ("mad/xps", "fix_mad"), ("mad/xrd", "fix_mad")]
 COMPUTE_STYLES = ["mad/pdf", "mad/property/coord", "mad/property/dipole",
                   "mad/property/mliap", "mad/property/python", "mad/property/table",
                   "mad/property/turbogap"]

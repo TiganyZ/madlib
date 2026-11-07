@@ -62,6 +62,10 @@ ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char *
     } else if (strcmp(arg[iarg], "cutoff") == 0) {
       rcut = utils::numeric(FLERR, arg[iarg + 1], false, lmp);
       iarg += 2;
+    } else if (strcmp(arg[iarg], "config") == 0) {
+      if (iarg + 1 >= narg) utils::missing_cmd_args(FLERR, "compute mad/property/python config", error);
+      config = arg[iarg + 1];
+      iarg += 2;
     } else if (strcmp(arg[iarg], "pbc") == 0) {
       if (strcmp(arg[iarg + 1], "yes") == 0)
         pbc_mode = 1;
@@ -74,8 +78,7 @@ ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char *
       error->all(FLERR, "Unknown compute mad/property/python keyword {}", arg[iarg]);
     }
   }
-  if ((ncomp != 1) && (ncomp != 3))
-    error->all(FLERR, "compute mad/property/python supports ncomp 1 or 3, not {}", ncomp);
+  if (ncomp < 1) error->all(FLERR, "compute mad/property/python ncomp must be positive");
   if (rcut <= 0.0 && !pbc_mode)
     error->all(FLERR, "compute mad/property/python requires a positive cutoff");
 
@@ -109,15 +112,37 @@ ComputeMADPropertyPython::ComputeMADPropertyPython(LAMMPS *lmp, int narg, char *
   if (!mod) fail("could not import the module");
   py_module = mod;
 
-  py_compute = PyObject_GetAttrString(mod, "mad_compute");
-  if (!py_compute) fail("the module has no mad_compute");
-  py_adjoint = PyObject_GetAttrString(mod, "mad_adjoint");
-  if (!py_adjoint) fail("the module has no mad_adjoint");
+  if (PyObject_HasAttrString(mod, "mad_bind")) {
+    PyObject *bind = PyObject_GetAttrString(mod, "mad_bind");
+    PyObject *bound = PyObject_CallFunction(bind, "s", config.c_str());
+    Py_XDECREF(bind);
+    if (!bound) fail("mad_bind raised an exception in");
+    if (!PySequence_Check(bound) || PySequence_Size(bound) != 2) {
+      Py_DECREF(bound);
+      fail("mad_bind must return (compute, adjoint) in");
+    }
+    py_compute = PySequence_GetItem(bound, 0);
+    py_adjoint = PySequence_GetItem(bound, 1);
+    Py_DECREF(bound);
+  } else {
+    // Accepting a config a module cannot read would leave the model on
+    // whatever its import-time default is, and it would still return numbers.
+    if (!config.empty())
+      error->all(FLERR,
+                 "compute mad/property/python: module '{}' has no mad_bind, so it cannot be given "
+                 "a config string",
+                 module_name);
+    py_compute = PyObject_GetAttrString(mod, "mad_compute");
+    if (!py_compute) fail("the module has no mad_compute");
+    py_adjoint = PyObject_GetAttrString(mod, "mad_adjoint");
+    if (!py_adjoint) fail("the module has no mad_adjoint");
+  }
 
   if (comm->me == 0)
-    utils::logmesg(lmp, "compute {}: python model '{}', {} component(s), {}\n", id, module_name,
-                   ncomp, pbc_mode ? std::string("one periodic cell") :
-                                     fmt::format("cutoff {:.4g}", rcut));
+    utils::logmesg(lmp, "compute {}: python model '{}'{}, {} component(s), {}\n", id, module_name,
+                   config.empty() ? std::string("") : fmt::format(" config '{}'", config), ncomp,
+                   pbc_mode ? std::string("one periodic cell") :
+                              fmt::format("cutoff {:.4g}", rcut));
 #endif
 }
 

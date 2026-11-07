@@ -1,0 +1,16 @@
+# Author: Tigany Zarrouk (tiganyzarrouk@gmail.com)
+#
+# A shielding tensor broadened against a shift target is mirrored, so the fix
+# has to be told which it has been given.
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data/gc91.data
+mass            * 12.011
+pair_style      zero 7.5
+pair_coeff      * *
+compute t   all mad/property/python madlib_models ncomp 6 cutoff 3.0 &
+            config "backend=callable fn=mad_tensor_toy:tensor types=C,O quantity=tensor6"
+fix     mad all mad/nmr/aniso c_t target data/nmr_aniso_target.dat &
+            range 75.0 95.0 101 gamma 1.0
+run 0
